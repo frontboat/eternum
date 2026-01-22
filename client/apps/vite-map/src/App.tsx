@@ -54,7 +54,7 @@ interface MapViewProps {
 }
 
 function MapView({ game, onBack }: MapViewProps) {
-  const { tiles, loading, error, loadTiles } = useTileData(game.toriiUrl);
+  const { tiles, resources, explorers, structures, quests, loading, error, loadTiles } = useTileData(game.toriiUrl);
   const [hoveredTile, setHoveredTile] = useState<MinimapTile | null>(null);
   const [selectedTile, setSelectedTile] = useState<MinimapTile | null>(null);
 
@@ -159,7 +159,14 @@ function MapView({ game, onBack }: MapViewProps) {
         <MapFitter tiles={tiles} coordConfig={coordConfig} />
 
         {/* Tile info panel */}
-        <TileInfoPanel tile={hoveredTile || selectedTile} />
+        <TileInfoPanel
+          tile={hoveredTile || selectedTile}
+          tileCenter={coordConfig}
+          resources={resources}
+          explorers={explorers}
+          structures={structures}
+          quests={quests}
+        />
 
         {/* Stats panel */}
         <div className="absolute top-4 left-4 z-10 rounded-md border border-border bg-background/95 p-3 shadow-md backdrop-blur-sm">
@@ -180,6 +187,10 @@ function MapView({ game, onBack }: MapViewProps) {
           </div>
           <div className="mt-2 pt-2 border-t text-xs text-muted-foreground">
             <div>{tiles.length.toLocaleString()} tiles loaded</div>
+            <div>{structures.size.toLocaleString()} structures</div>
+            <div>{explorers.size.toLocaleString()} explorers</div>
+            <div>{quests.size.toLocaleString()} quests</div>
+            <div>{resources.size.toLocaleString()} entities with resources</div>
             {loading && (
               <div className="flex items-center gap-1 mt-1">
                 <Loader2 className="size-3 animate-spin" />

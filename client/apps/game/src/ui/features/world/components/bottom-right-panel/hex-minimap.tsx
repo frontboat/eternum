@@ -10,6 +10,7 @@ import {
 } from "@bibliothecadao/eternum";
 import { BiomeIdToType, BiomeType, HexPosition, StructureType, TileOccupier } from "@bibliothecadao/types";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
+import { createPortal } from "react-dom";
 
 export interface MinimapTile {
   col: number;
@@ -196,7 +197,9 @@ interface HexMinimapProps {
 
 export const HexMinimap = ({ tiles, selectedHex, navigationTarget, cameraTargetHex }: HexMinimapProps) => {
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const fullscreenSvgRef = useRef<SVGSVGElement | null>(null);
   const [viewport, setViewport] = useState<{ width: number; height: number }>({ width: 800, height: 600 });
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const playerStructures = useUIStore((state) => state.playerStructures);
   const selectableArmies = useUIStore((state) => state.selectableArmies);
   const cameraDistance = useUIStore((state) => state.cameraDistance);
@@ -344,8 +347,19 @@ export const HexMinimap = ({ tiles, selectedHex, navigationTarget, cameraTargetH
     startFollowAnimation();
   }, [cameraTargetHex, startFollowAnimation]);
 
+  // Handle Escape key to close fullscreen
   useEffect(() => {
-    const svg = svgRef.current;
+    if (!isFullscreen) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsFullscreen(false);
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [isFullscreen]);
+
+  // ResizeObserver for the active SVG
+  useEffect(() => {
+    const svg = isFullscreen ? fullscreenSvgRef.current : svgRef.current;
     if (!svg || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
       const rect = svg.getBoundingClientRect();
@@ -355,7 +369,7 @@ export const HexMinimap = ({ tiles, selectedHex, navigationTarget, cameraTargetH
     });
     observer.observe(svg);
     return () => observer.disconnect();
-  }, []);
+  }, [isFullscreen]);
 
   const viewBox = useMemo(() => {
     const width = viewport.width / view.scale;
@@ -486,23 +500,27 @@ export const HexMinimap = ({ tiles, selectedHex, navigationTarget, cameraTargetH
     moved: boolean;
   } | null>(null);
 
-  const handlePointerDown = useCallback((e: PointerEvent<SVGSVGElement>) => {
-    if (!svgRef.current) return;
-    svgRef.current.setPointerCapture(e.pointerId);
-    isDraggingRef.current = true;
-    if (followRafRef.current !== null) {
-      cancelAnimationFrame(followRafRef.current);
-      followRafRef.current = null;
-      followTargetRef.current = null;
-    }
-    dragRef.current = {
-      pointerId: e.pointerId,
-      startClientX: e.clientX,
-      startClientY: e.clientY,
-      startView: viewRef.current,
-      moved: false,
-    };
-  }, []);
+  const handlePointerDown = useCallback(
+    (e: PointerEvent<SVGSVGElement>) => {
+      const targetSvg = isFullscreen ? fullscreenSvgRef.current : svgRef.current;
+      if (!targetSvg) return;
+      targetSvg.setPointerCapture(e.pointerId);
+      isDraggingRef.current = true;
+      if (followRafRef.current !== null) {
+        cancelAnimationFrame(followRafRef.current);
+        followRafRef.current = null;
+        followTargetRef.current = null;
+      }
+      dragRef.current = {
+        pointerId: e.pointerId,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startView: viewRef.current,
+        moved: false,
+      };
+    },
+    [isFullscreen],
+  );
 
   const handlePointerMove = useCallback(
     (e: PointerEvent<SVGSVGElement>) => {
@@ -528,17 +546,21 @@ export const HexMinimap = ({ tiles, selectedHex, navigationTarget, cameraTargetH
     [scheduleViewUpdate, scheduleCameraMove],
   );
 
-  const endDrag = useCallback((e: PointerEvent<SVGSVGElement>) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== e.pointerId) return;
-    dragRef.current = null;
-    isDraggingRef.current = false;
-    try {
-      svgRef.current?.releasePointerCapture(e.pointerId);
-    } catch {
-      // no-op
-    }
-  }, []);
+  const endDrag = useCallback(
+    (e: PointerEvent<SVGSVGElement>) => {
+      const drag = dragRef.current;
+      if (!drag || drag.pointerId !== e.pointerId) return;
+      dragRef.current = null;
+      isDraggingRef.current = false;
+      try {
+        const targetSvg = isFullscreen ? fullscreenSvgRef.current : svgRef.current;
+        targetSvg?.releasePointerCapture(e.pointerId);
+      } catch {
+        // no-op
+      }
+    },
+    [isFullscreen],
+  );
 
   const handleWheel = useCallback((e: WheelEvent<SVGSVGElement>) => {
     e.preventDefault();
@@ -553,19 +575,9 @@ export const HexMinimap = ({ tiles, selectedHex, navigationTarget, cameraTargetH
     scheduleViewUpdate({ ...initialView });
   }, [initialView, scheduleViewUpdate]);
 
-  return (
-    <svg
-      ref={svgRef}
-      viewBox={viewBox.value}
-      className="absolute inset-0 h-full w-full touch-none select-none"
-      onWheel={handleWheel}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      onPointerLeave={endDrag}
-      onDoubleClick={handleDoubleClick}
-    >
+  // SVG content to render in both regular and fullscreen modes
+  const svgContent = (
+    <>
       {visibleTiles.map(({ tile, points, pixel }) => {
         const marker = getTileMarker(tile);
         const fill = getBiomeColor(tile.biome);
@@ -610,6 +622,96 @@ export const HexMinimap = ({ tiles, selectedHex, navigationTarget, cameraTargetH
           />
         </g>
       )}
-    </svg>
+    </>
+  );
+
+  return (
+    <>
+      {/* Expand button */}
+      <button
+        onClick={() => setIsFullscreen(true)}
+        className="absolute top-2 right-2 z-10 p-1.5 bg-black/60 hover:bg-black/80 rounded transition-colors"
+        title="Expand minimap"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="text-white/80"
+        >
+          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+        </svg>
+      </button>
+
+      {/* Regular minimap SVG */}
+      <svg
+        ref={svgRef}
+        viewBox={viewBox.value}
+        className="absolute inset-0 h-full w-full touch-none select-none"
+        onWheel={handleWheel}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onPointerLeave={endDrag}
+        onDoubleClick={handleDoubleClick}
+      >
+        {svgContent}
+      </svg>
+
+      {/* Fullscreen overlay via portal */}
+      {isFullscreen &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center transition-opacity duration-200"
+            onClick={() => setIsFullscreen(false)}
+          >
+            <div className="relative w-[90vw] h-[90vh]" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => setIsFullscreen(false)}
+                className="absolute top-4 right-4 z-10 p-2 bg-black/60 hover:bg-black/80 rounded-full transition-colors"
+                title="Close"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="text-white"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+              <svg
+                ref={fullscreenSvgRef}
+                viewBox={viewBox.value}
+                className="h-full w-full touch-none select-none bg-gray-900/50 rounded-lg"
+                onWheel={handleWheel}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={endDrag}
+                onPointerCancel={endDrag}
+                onPointerLeave={endDrag}
+                onDoubleClick={handleDoubleClick}
+              >
+                {svgContent}
+              </svg>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 };

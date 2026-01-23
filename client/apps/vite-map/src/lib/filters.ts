@@ -72,15 +72,15 @@ export interface TileFilters {
 }
 
 export const DEFAULT_FILTERS: TileFilters = {
-  showStructures: true,
-  showExplorers: true,
-  showQuests: true,
-  showChests: true,
-  showRealms: true,
-  showVillages: true,
-  showHyperstructures: true,
-  showBanks: true,
-  showMines: true,
+  showStructures: false,
+  showExplorers: false,
+  showQuests: false,
+  showChests: false,
+  showRealms: false,
+  showVillages: false,
+  showHyperstructures: false,
+  showBanks: false,
+  showMines: false,
   ownerAddress: "",
 };
 
@@ -145,4 +145,91 @@ export function filterTiles(
 
     return true;
   });
+}
+
+// Base neutral color for tiles without highlighted entities
+export const BASE_TILE_COLOR = "#2a2a2a";
+
+// Highlight colors for different entity types
+export const HIGHLIGHT_COLORS = {
+  realm: "#f59e0b",        // Amber for realms
+  village: "#84cc16",      // Lime for villages
+  hyperstructure: "#8b5cf6", // Purple for hyperstructures
+  bank: "#06b6d4",         // Cyan for banks
+  mine: "#f97316",         // Orange for mines
+  explorer: "#ef4444",     // Red for explorers
+  quest: "#22c55e",        // Green for quests
+  chest: "#eab308",        // Yellow for chests
+} as const;
+
+/**
+ * Get the display color for a tile based on its occupier and active filters.
+ * When a filter is enabled, matching entities get a highlight color.
+ * Otherwise, returns the base neutral color.
+ */
+export function getTileHighlightColor(
+  tile: MinimapTile,
+  filters: TileFilters,
+  structures?: Map<string, StructureInfo>,
+  explorers?: Map<string, ExplorerInfo>,
+): string {
+  const occupierType = tile.occupier_type ?? 0;
+
+  // No occupier - base color
+  if (occupierType === 0) return BASE_TILE_COLOR;
+
+  // Check owner filter first - if set, non-matching entities get base color
+  if (filters.ownerAddress && tile.occupier_id) {
+    const normalizedFilter = filters.ownerAddress.toLowerCase();
+    let ownerMatches = false;
+
+    if (ALL_STRUCTURE_TYPES.includes(occupierType)) {
+      const structure = structures?.get(tile.occupier_id);
+      ownerMatches = structure ? structure.owner.toLowerCase().includes(normalizedFilter) : false;
+    } else if (ALL_EXPLORER_TYPES.includes(occupierType)) {
+      const explorer = explorers?.get(tile.occupier_id);
+      ownerMatches = explorer ? explorer.owner.toLowerCase().includes(normalizedFilter) : false;
+    }
+
+    if (!ownerMatches) return BASE_TILE_COLOR;
+  }
+
+  // Structure highlighting
+  if (ALL_STRUCTURE_TYPES.includes(occupierType)) {
+    if (!filters.showStructures) return BASE_TILE_COLOR;
+
+    if (REALM_TYPES.includes(occupierType)) {
+      return filters.showRealms ? HIGHLIGHT_COLORS.realm : BASE_TILE_COLOR;
+    }
+    if (VILLAGE_TYPES.includes(occupierType)) {
+      return filters.showVillages ? HIGHLIGHT_COLORS.village : BASE_TILE_COLOR;
+    }
+    if (HYPERSTRUCTURE_TYPES.includes(occupierType)) {
+      return filters.showHyperstructures ? HIGHLIGHT_COLORS.hyperstructure : BASE_TILE_COLOR;
+    }
+    if (BANK_TYPES.includes(occupierType)) {
+      return filters.showBanks ? HIGHLIGHT_COLORS.bank : BASE_TILE_COLOR;
+    }
+    if (MINE_TYPES.includes(occupierType)) {
+      return filters.showMines ? HIGHLIGHT_COLORS.mine : BASE_TILE_COLOR;
+    }
+  }
+
+  // Explorer highlighting
+  if (ALL_EXPLORER_TYPES.includes(occupierType)) {
+    return filters.showExplorers ? HIGHLIGHT_COLORS.explorer : BASE_TILE_COLOR;
+  }
+
+  // Quest highlighting
+  if (occupierType === QUEST_TYPE) {
+    return filters.showQuests ? HIGHLIGHT_COLORS.quest : BASE_TILE_COLOR;
+  }
+
+  // Chest highlighting
+  if (occupierType === CHEST_TYPE) {
+    return filters.showChests ? HIGHLIGHT_COLORS.chest : BASE_TILE_COLOR;
+  }
+
+  // Unknown occupier type - base color
+  return BASE_TILE_COLOR;
 }

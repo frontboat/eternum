@@ -22,9 +22,13 @@ import {
   type QuestInfo,
   type GuardTroop,
 } from "@/lib/torii-api";
+import { getTileHighlightColor, type TileFilters } from "@/lib/filters";
 
 interface EternumHexLayerProps {
   tiles: MinimapTile[];
+  filters: TileFilters;
+  structures?: Map<string, StructureInfo>;
+  explorers?: Map<string, ExplorerInfo>;
   onTileClick?: (tile: MinimapTile) => void;
   onTileHover?: (tile: MinimapTile | null) => void;
 }
@@ -35,6 +39,9 @@ interface EternumHexLayerProps {
  */
 export function EternumHexLayer({
   tiles,
+  filters,
+  structures,
+  explorers,
   onTileClick,
   onTileHover,
 }: EternumHexLayerProps) {
@@ -62,7 +69,7 @@ export function EternumHexLayer({
         { col: tile.col, row: tile.row },
         coordConfig
       );
-      const color = getBiomeColor(tile.biome);
+      const color = getTileHighlightColor(tile, filters, structures, explorers);
       const corners = hexCorners(lat, lng);
 
       return {
@@ -106,7 +113,7 @@ export function EternumHexLayer({
       type: "FeatureCollection" as const,
       features,
     };
-  }, [tiles, coordConfig]);
+  }, [tiles, coordConfig, filters, structures, explorers]);
 
   // Initialize source and layers
   useEffect(() => {

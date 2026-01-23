@@ -8,7 +8,6 @@ import {
   type CoordConfig,
 } from "@/lib/eternum-coords";
 import {
-  getBiomeColor,
   RESOURCE_NAMES,
   RESOURCE_ID_TO_NAME,
   TROOP_CATEGORIES,
@@ -20,9 +19,13 @@ import {
   type ExplorerInfo,
   type StructureInfo,
   type QuestInfo,
-  type GuardTroop,
 } from "@/lib/torii-api";
-import { getTileHighlightColor, type TileFilters } from "@/lib/filters";
+import {
+  getTileHighlightColor,
+  buildOwnerLabelMap,
+  getTileOwnerLabel,
+  type TileFilters,
+} from "@/lib/filters";
 
 interface EternumHexLayerProps {
   tiles: MinimapTile[];
@@ -50,6 +53,8 @@ export function EternumHexLayer({
   const sourceId = `eternum-tiles-${id}`;
   const fillLayerId = `eternum-tiles-fill-${id}`;
   const outlineLayerId = `eternum-tiles-outline-${id}`;
+  const labelSourceId = `eternum-labels-${id}`;
+  const labelLayerId = `eternum-labels-layer-${id}`;
 
   // Calculate the center from tile data for proper coordinate mapping
   const coordConfig = useMemo<CoordConfig>(() => {
@@ -115,6 +120,47 @@ export function EternumHexLayer({
     };
   }, [tiles, coordConfig, filters, structures, explorers]);
 
+  // Build owner label map
+  const ownerLabelMap = useMemo(() => {
+    if (!structures || !explorers) return new Map<string, string>();
+    return buildOwnerLabelMap(tiles, structures, explorers);
+  }, [tiles, structures, explorers]);
+
+  // Create label GeoJSON (Point features at hex centers)
+  const labelGeojson = useMemo(() => {
+    if (!structures || !explorers) {
+      return { type: "FeatureCollection" as const, features: [] };
+    }
+
+    const features = tiles
+      .map((tile) => {
+        const label = getTileOwnerLabel(tile, ownerLabelMap, structures, explorers);
+        if (!label) return null;
+
+        const [lat, lng] = eternumToLatLng(
+          { col: tile.col, row: tile.row },
+          coordConfig
+        );
+
+        return {
+          type: "Feature" as const,
+          geometry: {
+            type: "Point" as const,
+            coordinates: [lng, lat],
+          },
+          properties: {
+            ownerLabel: label,
+          },
+        };
+      })
+      .filter((f): f is NonNullable<typeof f> => f !== null);
+
+    return {
+      type: "FeatureCollection" as const,
+      features,
+    };
+  }, [tiles, coordConfig, ownerLabelMap, structures, explorers]);
+
   // Initialize source and layers
   useEffect(() => {
     if (!isLoaded || !map) return;
@@ -160,8 +206,44 @@ export function EternumHexLayer({
       },
     });
 
+    // Add label source
+    map.addSource(labelSourceId, {
+      type: "geojson",
+      data: labelGeojson,
+    });
+
+    // Add label layer
+    map.addLayer({
+      id: labelLayerId,
+      type: "symbol",
+      source: labelSourceId,
+      layout: {
+        "text-field": ["get", "ownerLabel"],
+        "text-font": ["Noto Sans Bold"],
+        "text-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          8, 6,
+          12, 10,
+          16, 16,
+          20, 24,
+        ],
+        "text-anchor": "center",
+        "text-allow-overlap": true,
+        "visibility": "none", // Start hidden
+      },
+      paint: {
+        "text-color": "#000000",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.5,
+      },
+    });
+
     return () => {
       try {
+        if (map.getLayer(labelLayerId)) map.removeLayer(labelLayerId);
+        if (map.getSource(labelSourceId)) map.removeSource(labelSourceId);
         if (map.getLayer(outlineLayerId)) map.removeLayer(outlineLayerId);
         if (map.getLayer(fillLayerId)) map.removeLayer(fillLayerId);
         if (map.getSource(sourceId)) map.removeSource(sourceId);
@@ -182,6 +264,30 @@ export function EternumHexLayer({
       source.setData(geojson);
     }
   }, [isLoaded, map, geojson, sourceId]);
+
+  // Update label source data when labels change
+  useEffect(() => {
+    if (!isLoaded || !map) return;
+
+    const source = map.getSource(labelSourceId) as maplibregl.GeoJSONSource;
+    if (source) {
+      source.setData(labelGeojson);
+    }
+  }, [isLoaded, map, labelGeojson, labelSourceId]);
+
+  // Toggle label layer visibility
+  useEffect(() => {
+    if (!isLoaded || !map) return;
+
+    const layer = map.getLayer(labelLayerId);
+    if (layer) {
+      map.setLayoutProperty(
+        labelLayerId,
+        "visibility",
+        filters.showOwnerLabels ? "visible" : "none"
+      );
+    }
+  }, [isLoaded, map, filters.showOwnerLabels, labelLayerId]);
 
   // Handle click and hover events
   useEffect(() => {

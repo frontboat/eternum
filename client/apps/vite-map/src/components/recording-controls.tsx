@@ -1,4 +1,4 @@
-import { Circle, Square, FolderOpen, Play } from "lucide-react";
+import { Circle, Square, Play } from "lucide-react";
 
 interface RecordingControlsProps {
   isRecording: boolean;

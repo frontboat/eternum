@@ -69,6 +69,9 @@ export interface TileFilters {
 
   // Owner filter (empty string means show all)
   ownerAddress: string;
+
+  // Display options
+  showOwnerLabels: boolean;
 }
 
 export const DEFAULT_FILTERS: TileFilters = {
@@ -82,6 +85,7 @@ export const DEFAULT_FILTERS: TileFilters = {
   showBanks: false,
   showMines: false,
   ownerAddress: "",
+  showOwnerLabels: false,
 };
 
 export function filterTiles(
@@ -232,4 +236,88 @@ export function getTileHighlightColor(
 
   // Unknown occupier type - base color
   return BASE_TILE_COLOR;
+}
+
+/**
+ * Convert a numeric index to an Excel-style column label (A, B, ... Z, AA, AB, ...).
+ */
+export function indexToLabel(index: number): string {
+  let label = "";
+  let n = index;
+  do {
+    label = String.fromCharCode(65 + (n % 26)) + label;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return label;
+}
+
+// Entity types that get owner labels (Realms, Villages, Hyperstructures, Explorers)
+export const LABELED_ENTITY_TYPES: readonly number[] = [
+  ...REALM_TYPES,
+  ...VILLAGE_TYPES,
+  ...HYPERSTRUCTURE_TYPES,
+  ...ALL_EXPLORER_TYPES,
+];
+
+/**
+ * Get the true owner address for an entity.
+ * For structures: returns structure.owner directly
+ * For explorers: explorer.owner is a realm ID, so we look up the realm's owner
+ */
+function getTrueOwner(
+  occupierType: number,
+  occupierId: string,
+  structures: Map<string, StructureInfo>,
+  explorers: Map<string, ExplorerInfo>,
+): string | undefined {
+  if (ALL_STRUCTURE_TYPES.includes(occupierType)) {
+    return structures.get(occupierId)?.owner;
+  } else if (ALL_EXPLORER_TYPES.includes(occupierType)) {
+    const explorer = explorers.get(occupierId);
+    if (!explorer?.owner) return undefined;
+    // Explorer's owner is a realm entity_id, look up the realm's actual owner
+    const ownerRealm = structures.get(explorer.owner);
+    return ownerRealm?.owner;
+  }
+  return undefined;
+}
+
+/**
+ * Build a map from owner address to label (A, B, C, ...).
+ * Owners are sorted lexicographically for consistent label assignment.
+ */
+export function buildOwnerLabelMap(
+  tiles: MinimapTile[],
+  structures: Map<string, StructureInfo>,
+  explorers: Map<string, ExplorerInfo>,
+): Map<string, string> {
+  const owners = new Set<string>();
+
+  for (const tile of tiles) {
+    const occupierType = tile.occupier_type ?? 0;
+    if (!LABELED_ENTITY_TYPES.includes(occupierType) || !tile.occupier_id) continue;
+
+    const owner = getTrueOwner(occupierType, tile.occupier_id, structures, explorers);
+    if (owner) owners.add(owner);
+  }
+
+  // Sort owners and assign labels
+  const sortedOwners = [...owners].sort();
+  return new Map(sortedOwners.map((addr, i) => [addr, indexToLabel(i)]));
+}
+
+/**
+ * Get the owner label for a tile, if applicable.
+ */
+export function getTileOwnerLabel(
+  tile: MinimapTile,
+  ownerLabelMap: Map<string, string>,
+  structures: Map<string, StructureInfo>,
+  explorers: Map<string, ExplorerInfo>,
+): string | null {
+  const occupierType = tile.occupier_type ?? 0;
+  if (!LABELED_ENTITY_TYPES.includes(occupierType) || !tile.occupier_id) return null;
+
+  const owner = getTrueOwner(occupierType, tile.occupier_id, structures, explorers);
+  return owner ? ownerLabelMap.get(owner) ?? null : null;
 }

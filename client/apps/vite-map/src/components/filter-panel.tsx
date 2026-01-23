@@ -129,6 +129,16 @@ export function FilterPanel({
             />
           </div>
 
+          {/* Display Options */}
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-muted-foreground mb-1">Display Options</p>
+            <FilterCheckbox
+              label="Show Owner Labels"
+              checked={filters.showOwnerLabels}
+              onChange={() => onToggleFilter("showOwnerLabels")}
+            />
+          </div>
+
           {/* Owner Filter */}
           <div className="space-y-1">
             <p className="text-xs font-medium text-muted-foreground mb-1">Owner Filter</p>

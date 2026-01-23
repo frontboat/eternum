@@ -1,5 +1,23 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { Map, MapControls, useMap } from "@/components/ui/map";
+import {
+  Map,
+  MapControls,
+  useMap,
+  MapDrawControl,
+  MapDrawModes,
+  MapDrawToolbar,
+  MapDrawPoint,
+  MapDrawLine,
+  MapDrawPolygon,
+  MapDrawRectangle,
+  MapDrawCircle,
+  MapDrawFreehand,
+  MapDrawSelect,
+  MapDrawDelete,
+  MapDrawDownload,
+  MapDrawImport,
+  MapDrawMapManager,
+} from "@/components/ui/map";
 import {
   EternumHexLayer,
   TileInfoPanel,
@@ -151,6 +169,28 @@ function MapView({ game, onBack }: MapViewProps) {
         styles={{ dark: BLANK_STYLE, light: BLANK_STYLE }}
       >
         <MapControls showZoom showFullscreen />
+
+        {/* Drawing controls */}
+        <MapDrawControl position="bottom-right">
+          <MapDrawModes>
+            <MapDrawSelect />
+            <MapDrawPoint />
+            <MapDrawLine />
+            <MapDrawPolygon />
+            <MapDrawDelete />
+          </MapDrawModes>
+          <MapDrawToolbar>
+            <MapDrawRectangle />
+            <MapDrawCircle />
+            <MapDrawFreehand />
+            <MapDrawDownload />
+            <MapDrawImport />
+          </MapDrawToolbar>
+          <MapDrawModes>
+            <MapDrawMapManager />
+          </MapDrawModes>
+        </MapDrawControl>
+
         <EternumHexLayer
           tiles={tiles}
           onTileClick={handleTileClick}

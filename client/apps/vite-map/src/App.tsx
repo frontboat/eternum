@@ -26,6 +26,9 @@ import {
 import { GameSelector } from "@/components/game-selector";
 import { PlaybackControls } from "@/components/playback-controls";
 import { RecordingControls } from "@/components/recording-controls";
+import { FilterPanel } from "@/components/filter-panel";
+import { useFilters } from "@/hooks/use-filters";
+import { filterTiles } from "@/lib/filters";
 import { useSnapshotRecorder } from "@/hooks/use-snapshot-recorder";
 import { useSnapshotPlayer } from "@/hooks/use-snapshot-player";
 import { calculateTileCenter, calculateTileBounds } from "@/lib/eternum-coords";
@@ -86,6 +89,9 @@ function MapView({ game, onBack }: MapViewProps) {
   // Playback
   const player = useSnapshotPlayer();
 
+  // Filters
+  const { filters, toggleFilter, setOwnerAddress, resetFilters } = useFilters();
+
   // Derive which data to display
   const isReplayMode = player.isLoaded;
   const displayData = isReplayMode && player.currentData
@@ -93,6 +99,11 @@ function MapView({ game, onBack }: MapViewProps) {
     : { tiles: liveTiles, resources: liveResources, explorers: liveExplorers, structures: liveStructures, quests: liveQuests };
 
   const { tiles, resources, explorers, structures, quests } = displayData;
+
+  // Apply filters to displayed tiles
+  const filteredTiles = useMemo(() => {
+    return filterTiles(tiles, filters, structures, explorers);
+  }, [tiles, filters, structures, explorers]);
 
   // Load tiles on mount
   useEffect(() => {
@@ -114,18 +125,18 @@ function MapView({ game, onBack }: MapViewProps) {
     return () => clearInterval(interval);
   }, [loadTiles, isReplayMode, recorder.isRecording, recorder.recordSnapshot, liveTiles, liveResources, liveExplorers, liveStructures, liveQuests, game.name, game.toriiUrl]);
 
-  // Calculate coordinate center and map center from tiles
+  // Calculate coordinate center and map center from filtered tiles
   const coordConfig = useMemo(() => {
-    if (tiles.length === 0) return { centerCol: 2147483646, centerRow: 2147483646 };
-    return calculateTileCenter(tiles);
-  }, [tiles]);
+    if (filteredTiles.length === 0) return { centerCol: 2147483646, centerRow: 2147483646 };
+    return calculateTileCenter(filteredTiles);
+  }, [filteredTiles]);
 
   const mapCenter = useMemo<[number, number]>(() => {
-    if (tiles.length === 0) return [0, 0];
-    const bounds = calculateTileBounds(tiles, coordConfig);
+    if (filteredTiles.length === 0) return [0, 0];
+    const bounds = calculateTileBounds(filteredTiles, coordConfig);
     // Return center as [lng, lat] for MapLibre
     return [(bounds.minLng + bounds.maxLng) / 2, (bounds.minLat + bounds.maxLat) / 2];
-  }, [tiles, coordConfig]);
+  }, [filteredTiles, coordConfig]);
 
   const handleTileClick = useCallback((tile: MinimapTile) => {
     setSelectedTile(tile);
@@ -237,11 +248,11 @@ function MapView({ game, onBack }: MapViewProps) {
         </MapDrawControl>
 
         <EternumHexLayer
-          tiles={tiles}
+          tiles={filteredTiles}
           onTileClick={handleTileClick}
           onTileHover={handleTileHover}
         />
-        <MapFitter tiles={tiles} coordConfig={coordConfig} />
+        <MapFitter tiles={filteredTiles} coordConfig={coordConfig} />
 
         {/* Tile info panel */}
         <TileInfoPanel
@@ -308,6 +319,16 @@ function MapView({ game, onBack }: MapViewProps) {
             </>
           )}
         </div>
+
+        {/* Filter panel */}
+        <FilterPanel
+          filters={filters}
+          onToggleFilter={toggleFilter}
+          onSetOwnerAddress={setOwnerAddress}
+          onResetFilters={resetFilters}
+          filteredCount={filteredTiles.length}
+          totalCount={tiles.length}
+        />
 
         {isReplayMode && (
           <PlaybackControls

@@ -24,6 +24,10 @@ import {
   useTileData,
 } from "@/components/eternum-hex-layer";
 import { GameSelector } from "@/components/game-selector";
+import { PlaybackControls } from "@/components/playback-controls";
+import { RecordingControls } from "@/components/recording-controls";
+import { useSnapshotRecorder } from "@/hooks/use-snapshot-recorder";
+import { useSnapshotPlayer } from "@/hooks/use-snapshot-player";
 import { calculateTileCenter, calculateTileBounds } from "@/lib/eternum-coords";
 import type { MinimapTile } from "@/lib/torii-api";
 import type { FactoryWorld } from "@/lib/factory-api";
@@ -72,20 +76,43 @@ interface MapViewProps {
 }
 
 function MapView({ game, onBack }: MapViewProps) {
-  const { tiles, resources, explorers, structures, quests, loading, error, loadTiles } = useTileData(game.toriiUrl);
+  const { tiles: liveTiles, resources: liveResources, explorers: liveExplorers, structures: liveStructures, quests: liveQuests, loading, error, loadTiles } = useTileData(game.toriiUrl);
   const [hoveredTile, setHoveredTile] = useState<MinimapTile | null>(null);
   const [selectedTile, setSelectedTile] = useState<MinimapTile | null>(null);
+
+  // Recording
+  const recorder = useSnapshotRecorder();
+
+  // Playback
+  const player = useSnapshotPlayer();
+
+  // Derive which data to display
+  const isReplayMode = player.isLoaded;
+  const displayData = isReplayMode && player.currentData
+    ? player.currentData
+    : { tiles: liveTiles, resources: liveResources, explorers: liveExplorers, structures: liveStructures, quests: liveQuests };
+
+  const { tiles, resources, explorers, structures, quests } = displayData;
 
   // Load tiles on mount
   useEffect(() => {
     loadTiles();
   }, [loadTiles]);
 
-  // Auto-refresh tiles periodically
+  // Auto-refresh tiles periodically (only in live mode)
   useEffect(() => {
-    const interval = setInterval(loadTiles, REFRESH_INTERVAL);
+    if (isReplayMode) return;
+    const interval = setInterval(async () => {
+      await loadTiles();
+      if (recorder.isRecording) {
+        await recorder.recordSnapshot(
+          { tiles: liveTiles, resources: liveResources, explorers: liveExplorers, structures: liveStructures, quests: liveQuests },
+          { worldName: game.name, toriiUrl: game.toriiUrl }
+        );
+      }
+    }, REFRESH_INTERVAL);
     return () => clearInterval(interval);
-  }, [loadTiles]);
+  }, [loadTiles, isReplayMode, recorder.isRecording, recorder.recordSnapshot, liveTiles, liveResources, liveExplorers, liveStructures, liveQuests, game.name, game.toriiUrl]);
 
   // Calculate coordinate center and map center from tiles
   const coordConfig = useMemo(() => {
@@ -111,6 +138,24 @@ function MapView({ game, onBack }: MapViewProps) {
   const handleRefresh = useCallback(() => {
     loadTiles();
   }, [loadTiles]);
+
+  const handleStartRecording = useCallback(async () => {
+    const started = await recorder.startRecording();
+    if (started && liveTiles.length > 0) {
+      await recorder.recordSnapshot(
+        { tiles: liveTiles, resources: liveResources, explorers: liveExplorers, structures: liveStructures, quests: liveQuests },
+        { worldName: game.name, toriiUrl: game.toriiUrl }
+      );
+    }
+  }, [recorder, liveTiles, liveResources, liveExplorers, liveStructures, liveQuests, game.name, game.toriiUrl]);
+
+  const handleLoadSnapshots = useCallback(async () => {
+    await player.loadSnapshots();
+  }, [player]);
+
+  const handleExitReplay = useCallback(() => {
+    player.unloadSnapshots();
+  }, [player]);
 
   // Loading state
   if (loading && tiles.length === 0) {
@@ -219,7 +264,9 @@ function MapView({ game, onBack }: MapViewProps) {
               <ArrowLeft className="size-4" />
             </button>
             <div>
-              <div className="text-sm font-medium">{game.name}</div>
+              <div className="text-sm font-medium">
+                {isReplayMode ? `${game.name} (Replay)` : game.name}
+              </div>
               <div className="text-[10px] text-muted-foreground uppercase">
                 {game.chain}
               </div>
@@ -238,15 +285,45 @@ function MapView({ game, onBack }: MapViewProps) {
               </div>
             )}
           </div>
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="mt-2 flex items-center gap-1.5 px-2 py-1 rounded text-xs bg-accent hover:bg-accent/80 transition-colors disabled:opacity-50 w-full justify-center"
-          >
-            <RefreshCw className={`size-3 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
+          {!isReplayMode && (
+            <>
+              <button
+                onClick={handleRefresh}
+                disabled={loading || recorder.isRecording}
+                className="mt-2 flex items-center gap-1.5 px-2 py-1 rounded text-xs bg-accent hover:bg-accent/80 transition-colors disabled:opacity-50 w-full justify-center"
+              >
+                <RefreshCw className={`size-3 ${loading ? "animate-spin" : ""}`} />
+                Refresh
+              </button>
+
+              <RecordingControls
+                isRecording={recorder.isRecording}
+                isSupported={recorder.isSupported}
+                snapshotCount={recorder.snapshotCount}
+                directoryName={recorder.directoryName}
+                onStartRecording={handleStartRecording}
+                onStopRecording={recorder.stopRecording}
+                onLoadSnapshots={handleLoadSnapshots}
+              />
+            </>
+          )}
         </div>
+
+        {isReplayMode && (
+          <PlaybackControls
+            snapshots={player.snapshots}
+            currentIndex={player.currentIndex}
+            isPlaying={player.isPlaying}
+            playbackSpeed={player.playbackSpeed}
+            onPlay={player.play}
+            onPause={player.pause}
+            onSetIndex={player.setIndex}
+            onStepForward={player.stepForward}
+            onStepBackward={player.stepBackward}
+            onSetSpeed={player.setPlaybackSpeed}
+            onExit={handleExitReplay}
+          />
+        )}
       </Map>
     </div>
   );

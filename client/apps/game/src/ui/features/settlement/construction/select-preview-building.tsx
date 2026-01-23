@@ -47,7 +47,10 @@ import {
 import { useComponentValue } from "@dojoengine/react";
 import { getComponentValue } from "@dojoengine/recs";
 import clsx from "clsx";
-import { InfoIcon, Pause, Play, Trash } from "lucide-react";
+import InfoIcon from "lucide-react/dist/esm/icons/info";
+import Pause from "lucide-react/dist/esm/icons/pause";
+import Play from "lucide-react/dist/esm/icons/play";
+import Trash from "lucide-react/dist/esm/icons/trash";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -1335,7 +1338,7 @@ const BuildingCard = ({
   );
 };
 
-export const ResourceInfo = ({
+const ResourceInfo = ({
   resourceId,
   buildingId,
   entityId,
@@ -1500,7 +1503,7 @@ export const ResourceInfo = ({
   );
 };
 
-export const BuildingInfo = ({
+const BuildingInfo = ({
   buildingId,
   entityId,
   name = BuildingTypeToString[buildingId as keyof typeof BuildingTypeToString],

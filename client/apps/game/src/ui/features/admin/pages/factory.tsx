@@ -33,18 +33,16 @@ import {
   setupGlobals,
 } from "@config-deployer/config";
 import { getGameManifest, type Chain } from "@contracts";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  Copy,
-  Download,
-  Loader2,
-  RefreshCw,
-  Trash2,
-  XCircle,
-} from "lucide-react";
+import AlertTriangle from "lucide-react/dist/esm/icons/alert-triangle";
+import CheckCircle2 from "lucide-react/dist/esm/icons/check-circle-2";
+import ChevronDown from "lucide-react/dist/esm/icons/chevron-down";
+import ChevronUp from "lucide-react/dist/esm/icons/chevron-up";
+import Copy from "lucide-react/dist/esm/icons/copy";
+import Download from "lucide-react/dist/esm/icons/download";
+import Loader2 from "lucide-react/dist/esm/icons/loader-2";
+import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw";
+import Trash2 from "lucide-react/dist/esm/icons/trash-2";
+import XCircle from "lucide-react/dist/esm/icons/x-circle";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { shortString } from "starknet";
@@ -53,7 +51,6 @@ import { AdminHeader } from "../components/admin-header";
 import {
   CARTRIDGE_API_BASE,
   DEFAULT_NAMESPACE,
-  DEFAULT_TORII_NAMESPACE,
   DEFAULT_VERSION,
   FACTORY_ADDRESSES,
   getDefaultBlitzRegistrationConfig,
@@ -669,7 +666,7 @@ export const FactoryPage = () => {
       await createIndexerService({
         env: envName,
         rpc_url: getRpcUrlForChain(currentChain),
-        torii_namespaces: DEFAULT_TORII_NAMESPACE,
+        torii_namespaces: DEFAULT_NAMESPACE,
         torii_prefix: worldName,
         torii_world_address: deployedWorldAddress,
         external_contracts: [],

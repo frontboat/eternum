@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BarChart3, History, RefreshCw, Users } from "lucide-react";
+import BarChart3 from "lucide-react/dist/esm/icons/bar-chart-3";
+import History from "lucide-react/dist/esm/icons/history";
+import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw";
+import Users from "lucide-react/dist/esm/icons/users";
 import type { LucideIcon } from "lucide-react";
 
 import type { MarketClass, MarketOutcome } from "@/pm/class";
@@ -7,7 +10,7 @@ import { useMarket } from "@pm/sdk";
 import { ScrollArea } from "@pm/ui";
 
 import Button from "@/ui/design-system/atoms/button";
-import { Panel } from "@/ui/design-system/atoms/panel";
+import Panel from "@/ui/design-system/atoms/panel";
 
 import { MarketActivity } from "@/ui/features/landing/sections/markets/details/market-activity";
 import { MarketHistory } from "@/ui/features/landing/sections/markets/details/market-history";

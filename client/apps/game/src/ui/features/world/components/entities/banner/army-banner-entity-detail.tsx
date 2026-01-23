@@ -1,4 +1,5 @@
-import { Loader, Trash2 } from "lucide-react";
+import Loader from "lucide-react/dist/esm/icons/loader";
+import Trash2 from "lucide-react/dist/esm/icons/trash-2";
 import { memo, useMemo } from "react";
 
 import { ReactComponent as Lightning } from "@/assets/icons/common/lightning.svg";
@@ -12,7 +13,7 @@ import { CompactEntityInventory } from "../compact-entity-inventory";
 import { useArmyEntityDetail } from "../hooks/use-army-entity-detail";
 import { EntityDetailLayoutVariant, EntityDetailSection } from "../layout";
 
-export interface ArmyBannerEntityDetailProps {
+interface ArmyBannerEntityDetailProps {
   armyEntityId: ID;
   className?: string;
   compact?: boolean;

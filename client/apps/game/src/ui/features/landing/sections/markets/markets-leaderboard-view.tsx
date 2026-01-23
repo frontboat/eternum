@@ -1,7 +1,9 @@
-import { Crown, Medal, Trophy } from "lucide-react";
+import Crown from "lucide-react/dist/esm/icons/crown";
+import Medal from "lucide-react/dist/esm/icons/medal";
+import Trophy from "lucide-react/dist/esm/icons/trophy";
 import { ScrollArea } from "@pm/ui";
 
-import { Panel } from "@/ui/design-system/atoms/panel";
+import Panel from "@/ui/design-system/atoms/panel";
 import { RefreshButton } from "@/ui/design-system/atoms/refresh-button";
 import { MaybeController } from "./maybe-controller";
 import { TokenIcon } from "./token-icon";

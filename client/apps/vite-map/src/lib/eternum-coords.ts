@@ -66,8 +66,10 @@ export function eternumToLatLng(
   const centeredRow = coord.row - centerRow;
 
   // Offset coordinate system (matches game's minimap)
-  // Odd rows are offset by half a hex width
-  const rowOffset = ((centeredRow % 2) * Math.sign(centeredRow)) / 2;
+  // Odd rows are offset to the LEFT by half a hex width
+  // IMPORTANT: Use original coord.row for parity, not centeredRow
+  // This ensures the offset pattern matches the game regardless of center position
+  const rowOffset = ((coord.row % 2) * Math.sign(coord.row)) / 2;
   const x = centeredCol - rowOffset;
   const y = centeredRow * 0.75;
 
@@ -96,12 +98,14 @@ export function latLngToEternum(
   const x = lng / (SQRT3 * HEX_SCALE);
 
   const centeredRow = Math.round(y / 0.75);
-  const rowOffset = ((centeredRow % 2) * Math.sign(centeredRow)) / 2;
+  // Use actual row (not centered) for offset parity calculation
+  const actualRow = centeredRow + centerRow;
+  const rowOffset = ((actualRow % 2) * Math.sign(actualRow)) / 2;
   const centeredCol = Math.round(x + rowOffset);
 
   return {
     col: centeredCol + centerCol,
-    row: centeredRow + centerRow,
+    row: actualRow,
   };
 }
 

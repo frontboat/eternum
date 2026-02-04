@@ -17,3 +17,4 @@ client/apps/game/minimap
 .claude/tsc-cache/
 **/.claude/tsc-cache/
 thoughts/
+packages/eternum-analytics/data/*.json

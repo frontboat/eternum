@@ -11,12 +11,12 @@ function ensureDataDir() {
   }
 }
 
-export function loadStore(): AnalyticsStore {
+export async function loadStore(): Promise<AnalyticsStore> {
   ensureDataDir();
 
   if (existsSync(STORE_FILE)) {
-    const content = Bun.file(STORE_FILE).text();
-    return JSON.parse(content as unknown as string) as AnalyticsStore;
+    const content = await Bun.file(STORE_FILE).text();
+    return JSON.parse(content) as AnalyticsStore;
   }
 
   return {

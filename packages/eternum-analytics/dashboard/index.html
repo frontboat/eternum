@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eternum Analytics</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 2rem; }
+    h1 { margin-bottom: 2rem; color: #fff; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .card { background: #1a1a1a; padding: 1.5rem; border-radius: 8px; border: 1px solid #333; }
+    .card-value { font-size: 2rem; font-weight: bold; color: #fff; }
+    .card-label { color: #888; margin-top: 0.5rem; }
+    table { width: 100%; border-collapse: collapse; background: #1a1a1a; border-radius: 8px; overflow: hidden; }
+    th, td { padding: 1rem; text-align: left; border-bottom: 1px solid #333; }
+    th { background: #252525; color: #888; font-weight: 500; }
+    tr:hover { background: #222; }
+    .loading { color: #666; }
+    .updated { color: #666; font-size: 0.875rem; margin-top: 2rem; }
+  </style>
+</head>
+<body>
+  <h1>Eternum Analytics</h1>
+
+  <div class="cards" id="summary">
+    <div class="card">
+      <div class="card-value" id="totalGames">-</div>
+      <div class="card-label">Total Games</div>
+    </div>
+    <div class="card">
+      <div class="card-value" id="totalPlayers">-</div>
+      <div class="card-label">Total Players</div>
+    </div>
+    <div class="card">
+      <div class="card-value" id="totalTransactions">-</div>
+      <div class="card-label">Total Transactions</div>
+    </div>
+    <div class="card">
+      <div class="card-value" id="avgTxPerPlayer">-</div>
+      <div class="card-label">Avg Tx / Player</div>
+    </div>
+  </div>
+
+  <h2 style="margin-bottom: 1rem;">Games</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>World</th>
+        <th>Players</th>
+        <th>Transactions</th>
+        <th>Avg Tx/Player</th>
+        <th>Duration</th>
+        <th>New Players</th>
+      </tr>
+    </thead>
+    <tbody id="gamesTable">
+      <tr><td colspan="6" class="loading">Loading...</td></tr>
+    </tbody>
+  </table>
+
+  <div class="updated" id="lastUpdated"></div>
+
+  <script>
+    async function loadData() {
+      try {
+        const [summary, metrics] = await Promise.all([
+          fetch('/api/metrics/summary').then(r => r.json()),
+          fetch('/api/metrics').then(r => r.json())
+        ]);
+
+        document.getElementById('totalGames').textContent = summary.totalGames.toLocaleString();
+        document.getElementById('totalPlayers').textContent = summary.totalPlayers.toLocaleString();
+        document.getElementById('totalTransactions').textContent = summary.totalTransactions.toLocaleString();
+        document.getElementById('avgTxPerPlayer').textContent = summary.avgTxPerPlayer.toLocaleString();
+        document.getElementById('lastUpdated').textContent = `Last updated: ${new Date(summary.lastUpdated).toLocaleString()}`;
+
+        const tbody = document.getElementById('gamesTable');
+        tbody.innerHTML = metrics
+          .sort((a, b) => new Date(b.collectedAt) - new Date(a.collectedAt))
+          .map(m => `
+            <tr>
+              <td>${m.worldSlug}</td>
+              <td>${m.totalPlayers}</td>
+              <td>${m.totalTransactions.toLocaleString()}</td>
+              <td>${m.avgTxPerPlayer}</td>
+              <td>${m.durationHours}h</td>
+              <td>${m.newPlayers}</td>
+            </tr>
+          `).join('');
+      } catch (error) {
+        console.error('Failed to load data:', error);
+        document.getElementById('gamesTable').innerHTML = '<tr><td colspan="6">Failed to load data</td></tr>';
+      }
+    }
+
+    loadData();
+  </script>
+</body>
+</html>

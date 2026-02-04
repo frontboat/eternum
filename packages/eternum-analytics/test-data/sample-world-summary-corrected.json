@@ -1,0 +1,11 @@
+{
+  "world_slug": "test-opal-dark-97",
+  "start_time": "2026-02-04T13:42:57+00:00",
+  "end_time": "2026-02-04T17:59:40+00:00",
+  "duration_hours": 4.28,
+  "total_transactions": 849,
+  "unique_senders": 20,
+  "registered_players": 4,
+  "avg_tx_per_player": 212.25,
+  "note": "unique_senders includes session keys, contracts, etc. Use registered_players for actual player count."
+}

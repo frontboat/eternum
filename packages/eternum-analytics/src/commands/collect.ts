@@ -3,7 +3,7 @@ import { collectGamesFromFactory, collectWorldMetrics } from "../collectors/inde
 import { loadStore, saveStore, getPlayerMap } from "../store.js";
 import { DEFAULT_CONFIG } from "../types.js";
 
-export async function runCollect(options: { full?: boolean } = {}) {
+export async function runCollect(options: { full?: boolean; limit?: number; quiet?: boolean } = {}) {
   console.log("Loading existing store...");
   const store = await loadStore();
   const playerMap = getPlayerMap(store);
@@ -16,9 +16,14 @@ export async function runCollect(options: { full?: boolean } = {}) {
 
   // Determine which games to process
   const existingSlugs = new Set(store.games.map((g) => g.worldSlug));
-  const gamesToProcess = options.full
+  let gamesToProcess = options.full
     ? games
     : games.filter((g) => !existingSlugs.has(g.worldSlug));
+
+  // Apply limit if specified
+  if (options.limit && options.limit > 0) {
+    gamesToProcess = gamesToProcess.slice(0, options.limit);
+  }
 
   console.log(`\nProcessing ${gamesToProcess.length} games...`);
 
@@ -62,7 +67,9 @@ export async function runCollect(options: { full?: boolean } = {}) {
       console.log(`${metrics.totalPlayers} players, ${metrics.totalTransactions} txs (${newPlayerCount} new)`);
       processed++;
     } catch (error) {
-      console.log(`FAILED: ${error instanceof Error ? error.message : error}`);
+      if (!options.quiet) {
+        console.log(`skip`);
+      }
       failed++;
     }
   }

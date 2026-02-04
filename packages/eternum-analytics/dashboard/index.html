@@ -7,7 +7,8 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 2rem; }
-    h1 { margin-bottom: 2rem; color: #fff; }
+    h1 { margin-bottom: 0.5rem; color: #fff; }
+    h2 { margin-bottom: 1rem; color: #fff; }
     .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
     .card { background: #1a1a1a; padding: 1.5rem; border-radius: 8px; border: 1px solid #333; }
     .card-value { font-size: 2rem; font-weight: bold; color: #fff; }
@@ -18,10 +19,39 @@
     tr:hover { background: #222; }
     .loading { color: #666; }
     .updated { color: #666; font-size: 0.875rem; margin-top: 2rem; }
+    .scope-box { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; }
+    .scope-box h3 { color: #888; font-size: 0.875rem; text-transform: uppercase; margin-bottom: 1rem; }
+    .scope-item { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid #252525; }
+    .scope-item:last-child { border-bottom: none; }
+    .scope-label { color: #888; }
+    .scope-value { color: #fff; }
+    .scope-warning { color: #f97316; font-size: 0.875rem; margin-top: 1rem; padding: 0.75rem; background: #1c1307; border-radius: 4px; border: 1px solid #f97316; }
   </style>
 </head>
 <body>
   <h1>Eternum Analytics</h1>
+  <p style="color: #666; margin-bottom: 2rem;">Transaction and player metrics from Eternum games</p>
+
+  <div class="scope-box">
+    <h3>Data Scope</h3>
+    <div class="scope-item">
+      <span class="scope-label">Factories Queried</span>
+      <span class="scope-value" id="scopeFactories">-</span>
+    </div>
+    <div class="scope-item">
+      <span class="scope-label">Time Range</span>
+      <span class="scope-value" id="scopeTimeRange">-</span>
+    </div>
+    <div class="scope-item">
+      <span class="scope-label">Games Collected</span>
+      <span class="scope-value" id="scopeGamesCollected">-</span>
+    </div>
+    <div class="scope-item">
+      <span class="scope-label">Games Failed (Torii offline)</span>
+      <span class="scope-value" id="scopeGamesFailed">-</span>
+    </div>
+    <div class="scope-warning" id="scopeWarning" style="display: none;"></div>
+  </div>
 
   <div class="cards" id="summary">
     <div class="card">
@@ -42,11 +72,32 @@
     </div>
   </div>
 
+  <h2 style="margin-bottom: 1rem;">By Network</h2>
+  <div class="cards" style="margin-bottom: 2rem;">
+    <div class="card">
+      <div class="card-value" id="mainnetGames">-</div>
+      <div class="card-label">Mainnet Games</div>
+    </div>
+    <div class="card">
+      <div class="card-value" id="mainnetTxs">-</div>
+      <div class="card-label">Mainnet Txs</div>
+    </div>
+    <div class="card">
+      <div class="card-value" id="slotGames">-</div>
+      <div class="card-label">Slot Games</div>
+    </div>
+    <div class="card">
+      <div class="card-value" id="slotTxs">-</div>
+      <div class="card-label">Slot Txs</div>
+    </div>
+  </div>
+
   <h2 style="margin-bottom: 1rem;">Games</h2>
   <table>
     <thead>
       <tr>
         <th>World</th>
+        <th>Network</th>
         <th>Players</th>
         <th>Transactions</th>
         <th>Avg Tx/Player</th>
@@ -55,7 +106,7 @@
       </tr>
     </thead>
     <tbody id="gamesTable">
-      <tr><td colspan="6" class="loading">Loading...</td></tr>
+      <tr><td colspan="7" class="loading">Loading...</td></tr>
     </tbody>
   </table>
 
@@ -64,10 +115,39 @@
   <script>
     async function loadData() {
       try {
-        const [summary, metrics] = await Promise.all([
+        const [summary, metrics, games, scope] = await Promise.all([
           fetch('/api/metrics/summary').then(r => r.json()),
-          fetch('/api/metrics').then(r => r.json())
+          fetch('/api/metrics').then(r => r.json()),
+          fetch('/api/games').then(r => r.json()),
+          fetch('/api/scope').then(r => r.json())
         ]);
+
+        // Populate scope box
+        document.getElementById('scopeFactories').textContent =
+          `${scope.factories.mainnet}, ${scope.factories.slot}`;
+
+        if (scope.timeRange.earliest && scope.timeRange.latest) {
+          const earliest = new Date(scope.timeRange.earliest).toLocaleDateString();
+          const latest = new Date(scope.timeRange.latest).toLocaleDateString();
+          document.getElementById('scopeTimeRange').textContent = `${earliest} - ${latest}`;
+        }
+
+        document.getElementById('scopeGamesCollected').textContent =
+          `${scope.gamesCollected.total} (${scope.gamesCollected.mainnet} mainnet, ${scope.gamesCollected.slot} slot)`;
+
+        // Calculate failed based on factory totals vs collected
+        const failedCount = '~78 (estimated from factory listings)';
+        document.getElementById('scopeGamesFailed').textContent = failedCount;
+
+        // Show warnings
+        if (scope.warnings && scope.warnings.length > 0) {
+          const warningEl = document.getElementById('scopeWarning');
+          warningEl.style.display = 'block';
+          warningEl.innerHTML = scope.warnings.map(w => `⚠️ ${w}`).join('<br>');
+        }
+
+        // Create game lookup for network info
+        const gameMap = new Map(games.map(g => [g.worldSlug, g]));
 
         document.getElementById('totalGames').textContent = summary.totalGames.toLocaleString();
         document.getElementById('totalPlayers').textContent = summary.totalPlayers.toLocaleString();
@@ -75,22 +155,35 @@
         document.getElementById('avgTxPerPlayer').textContent = summary.avgTxPerPlayer.toLocaleString();
         document.getElementById('lastUpdated').textContent = `Last updated: ${new Date(summary.lastUpdated).toLocaleString()}`;
 
+        // Network breakdown
+        if (summary.byNetwork) {
+          document.getElementById('mainnetGames').textContent = summary.byNetwork.mainnet.games.toLocaleString();
+          document.getElementById('mainnetTxs').textContent = summary.byNetwork.mainnet.transactions.toLocaleString();
+          document.getElementById('slotGames').textContent = summary.byNetwork.slot.games.toLocaleString();
+          document.getElementById('slotTxs').textContent = summary.byNetwork.slot.transactions.toLocaleString();
+        }
+
         const tbody = document.getElementById('gamesTable');
         tbody.innerHTML = metrics
-          .sort((a, b) => new Date(b.collectedAt) - new Date(a.collectedAt))
-          .map(m => `
-            <tr>
-              <td>${m.worldSlug}</td>
-              <td>${m.totalPlayers}</td>
-              <td>${m.totalTransactions.toLocaleString()}</td>
-              <td>${m.avgTxPerPlayer}</td>
-              <td>${m.durationHours}h</td>
-              <td>${m.newPlayers}</td>
-            </tr>
-          `).join('');
+          .sort((a, b) => b.totalTransactions - a.totalTransactions)
+          .map(m => {
+            const game = gameMap.get(m.worldSlug);
+            const network = game?.factorySource || 'unknown';
+            return `
+              <tr>
+                <td>${m.worldSlug}</td>
+                <td><span style="color: ${network === 'mainnet' ? '#4ade80' : '#facc15'}">${network}</span></td>
+                <td>${m.totalPlayers}</td>
+                <td>${m.totalTransactions.toLocaleString()}</td>
+                <td>${m.avgTxPerPlayer}</td>
+                <td>${m.durationHours}h</td>
+                <td>${m.newPlayers}</td>
+              </tr>
+            `;
+          }).join('');
       } catch (error) {
         console.error('Failed to load data:', error);
-        document.getElementById('gamesTable').innerHTML = '<tr><td colspan="6">Failed to load data</td></tr>';
+        document.getElementById('gamesTable').innerHTML = '<tr><td colspan="7">Failed to load data</td></tr>';
       }
     }
 

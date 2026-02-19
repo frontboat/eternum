@@ -59,7 +59,6 @@ import {
 } from "@bibliothecadao/types";
 import { getComponentValue } from "@dojoengine/recs";
 import { getEntityIdFromKeys } from "@dojoengine/utils";
-import throttle from "lodash/throttle";
 import { Account, AccountInterface } from "starknet";
 import {
   Box3,
@@ -340,7 +339,9 @@ export default class WorldmapScene extends HexagonScene {
   private selectionPulseManager: SelectionPulseManager;
   private structurePulseColorCache: Map<string, { base: Color; pulse: Color }> = new Map();
   private armyStructureOwners: Map<ID, ID> = new Map();
-  private updateCameraTargetHexThrottled?: ReturnType<typeof throttle>;
+  private cameraViewportFrameHandle: number | null = null;
+  private cameraViewportDirty = false;
+  private minimapCameraMoveQueued = false;
   private updateCameraTargetHex = () => {
     const normalizedHex = this.getCameraTargetHex();
     const contractHex = new Position({ x: normalizedHex.col, y: normalizedHex.row }).getContract();
@@ -359,13 +360,40 @@ export default class WorldmapScene extends HexagonScene {
     useUIStore.setState(nextState);
   };
   private minimapCameraMoveTarget: { col: number; row: number } | null = null;
-  private minimapCameraMoveThrottled?: ReturnType<typeof throttle>;
+  private scheduleCameraViewportFrame = () => {
+    if (this.cameraViewportFrameHandle !== null) return;
+    this.cameraViewportFrameHandle = requestAnimationFrame(() => {
+      this.cameraViewportFrameHandle = null;
+
+      if (this.sceneManager.getCurrentScene() !== SceneName.WorldMap) return;
+
+      if (this.minimapCameraMoveQueued) {
+        this.minimapCameraMoveQueued = false;
+        const target = this.minimapCameraMoveTarget;
+        if (target) {
+          this.moveCameraToColRow(target.col, target.row, 0.25);
+        }
+      }
+
+      if (this.cameraViewportDirty) {
+        this.cameraViewportDirty = false;
+        this.updateCameraTargetHex();
+      }
+    });
+  };
+
+  private markCameraViewportDirty = () => {
+    this.cameraViewportDirty = true;
+    this.scheduleCameraViewportFrame();
+  };
+
   private minimapCameraMoveHandler = (event: Event) => {
     if (this.sceneManager.getCurrentScene() !== SceneName.WorldMap) return;
     const detail = (event as CustomEvent<{ col: number; row: number }>).detail;
     if (!detail) return;
     this.minimapCameraMoveTarget = detail;
-    this.minimapCameraMoveThrottled?.();
+    this.minimapCameraMoveQueued = true;
+    this.markCameraViewportDirty();
   };
   private minimapZoomHandler = (event: Event) => {
     if (this.sceneManager.getCurrentScene() !== SceneName.WorldMap) return;
@@ -401,7 +429,7 @@ export default class WorldmapScene extends HexagonScene {
   };
   private handleControlsChangeForMinimap = () => {
     if (this.sceneManager.getCurrentScene() !== SceneName.WorldMap) return;
-    this.updateCameraTargetHexThrottled?.();
+    this.markCameraViewportDirty();
 
     const nextCameraDistance = this.getCurrentCameraDistance();
     const refreshPlan = resolveControlsChangeChunkRefreshPlan({
@@ -907,16 +935,10 @@ export default class WorldmapScene extends HexagonScene {
 
     // Legacy canvas minimap has been replaced by the React minimap (BottomRightPanel/HexMinimap).
     // We keep only the "minimapCameraMove" event bridge + cameraTargetHex updates for the UI.
-    this.updateCameraTargetHexThrottled = throttle(this.updateCameraTargetHex, 33);
-    this.minimapCameraMoveThrottled = throttle(() => {
-      const target = this.minimapCameraMoveTarget;
-      if (!target) return;
-      this.moveCameraToColRow(target.col, target.row, 0.25);
-    }, 16);
     window.addEventListener("minimapCameraMove", this.minimapCameraMoveHandler as EventListener);
     window.addEventListener("minimapZoom", this.minimapZoomHandler as EventListener);
     this.controls.addEventListener("change", this.handleControlsChangeForMinimap);
-    this.updateCameraTargetHexThrottled();
+    this.markCameraViewportDirty();
 
     // Initialize SceneShortcutManager for WorldMap shortcuts
     this.shortcutManager = new SceneShortcutManager("worldmap", this.sceneManager);
@@ -4525,7 +4547,6 @@ export default class WorldmapScene extends HexagonScene {
     this.selectedHexManager.update(deltaTime);
     this.structureManager.updateAnimations(deltaTime, animationContext);
     this.chestManager.update(deltaTime);
-    this.updateCameraTargetHexThrottled?.();
     if (WORLDMAP_ZOOM_HARDENING.terrainSelfHeal) {
       this.monitorTerrainVisibilityHealth();
     } else {
@@ -4893,8 +4914,10 @@ export default class WorldmapScene extends HexagonScene {
     this.toriiBoundsAreaKey = null;
 
     this.resourceFXManager.destroy();
-    this.updateCameraTargetHexThrottled?.cancel();
-    this.minimapCameraMoveThrottled?.cancel();
+    if (this.cameraViewportFrameHandle !== null) {
+      cancelAnimationFrame(this.cameraViewportFrameHandle);
+      this.cameraViewportFrameHandle = null;
+    }
     this.controls.removeEventListener("change", this.handleControlsChangeForMinimap);
     window.removeEventListener("minimapCameraMove", this.minimapCameraMoveHandler as EventListener);
     window.removeEventListener("minimapZoom", this.minimapZoomHandler as EventListener);

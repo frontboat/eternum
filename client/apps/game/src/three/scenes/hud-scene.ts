@@ -138,7 +138,7 @@ export default class HUDScene {
   }
 
   update(deltaTime: number, cycleProgress?: number) {
-    this.navigator.update();
+    this.navigator.update(deltaTime);
 
     // Update weather system (handles rain, wind, transitions)
     this.weatherManager.update(deltaTime, this.camera.position);

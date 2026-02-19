@@ -1,6 +1,5 @@
 import { gltfLoader } from "@/three/utils/utils";
 import { type HexPosition } from "@bibliothecadao/types";
-import throttle from "lodash/throttle";
 import * as THREE from "three";
 import { CSS2DObject } from "three-stdlib";
 import { type MapControls } from "three/examples/jsm/controls/MapControls.js";
@@ -16,6 +15,8 @@ export class Navigator {
   private guiFolder: any;
   private label: THREE.Group | null = null;
   private distanceDiv: HTMLElement | null = null;
+  private distanceUpdateElapsedSeconds = 0;
+  private readonly distanceUpdateIntervalSeconds = 0.1;
 
   constructor(scene: THREE.Scene, controls: MapControls, guiFolder: any) {
     this.scene = scene;
@@ -51,6 +52,7 @@ export class Navigator {
 
   clearNavigationTarget() {
     this.target = null;
+    this.distanceUpdateElapsedSeconds = 0;
     if (this.arrowModel) {
       this.arrowModel.visible = false;
       this.distanceDiv!.textContent = "";
@@ -60,6 +62,7 @@ export class Navigator {
 
   setNavigationTarget(col: number, row: number) {
     this.target = { col, row };
+    this.distanceUpdateElapsedSeconds = this.distanceUpdateIntervalSeconds;
     if (this.arrowModel) {
       this.arrowModel.visible = true;
       this.distanceDiv!.style.backgroundColor = "rgba(0, 0, 0, 0.6)";
@@ -87,7 +90,7 @@ export class Navigator {
     this.arrowModel.rotation.copy(dummyObject.rotation);
   }
 
-  private calculateDistance = throttle(() => {
+  private calculateDistance() {
     if (!this.target) return;
 
     const targetPosition = getWorldPositionForHex(this.target, true);
@@ -107,10 +110,17 @@ export class Navigator {
     } else {
       this.distanceDiv!.textContent = "You are at the target!";
     }
-  }, 100);
+  }
 
-  update() {
+  update(deltaTime: number) {
     this.updateArrowRotation();
+
+    this.distanceUpdateElapsedSeconds += deltaTime;
+    if (this.distanceUpdateElapsedSeconds < this.distanceUpdateIntervalSeconds) {
+      return;
+    }
+
+    this.distanceUpdateElapsedSeconds = 0;
     this.calculateDistance();
   }
 

@@ -18,6 +18,8 @@ interface ControllerSessionConfig {
   basePath?: string;
   manifest: SessionManifest;
   worldProfile?: WorldProfile;
+  /** When set, the auth URL is passed to this callback instead of opening a browser. */
+  onAuthUrl?: (url: string) => void;
 }
 
 interface BuildSessionPolicyOptions {
@@ -377,13 +379,20 @@ export class ControllerSession {
       basePath: config.basePath ?? ".cartridge",
     });
 
-    // Patch openLink to actually open the browser instead of just printing the URL
+    // Patch openLink: either capture URL via callback or open browser
     const backend = (this.provider as any)._backend;
     if (backend) {
-      backend.openLink = (url: string) => {
-        const openCmd = process.platform === "darwin" ? "open" : "xdg-open";
-        execFile(openCmd, [url]);
-      };
+      if (config.onAuthUrl) {
+        const callback = config.onAuthUrl;
+        backend.openLink = (url: string) => {
+          callback(url);
+        };
+      } else {
+        backend.openLink = (url: string) => {
+          const openCmd = process.platform === "darwin" ? "open" : "xdg-open";
+          execFile(openCmd, [url]);
+        };
+      }
     }
   }
 

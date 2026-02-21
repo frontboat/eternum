@@ -55,8 +55,10 @@ export class Navigator {
     this.distanceUpdateElapsedSeconds = 0;
     if (this.arrowModel) {
       this.arrowModel.visible = false;
-      this.distanceDiv!.textContent = "";
-      this.distanceDiv!.style.backgroundColor = "transparent";
+      if (this.distanceDiv) {
+        this.distanceDiv.textContent = "";
+        this.distanceDiv.style.backgroundColor = "transparent";
+      }
     }
   }
 
@@ -65,7 +67,9 @@ export class Navigator {
     this.distanceUpdateElapsedSeconds = this.distanceUpdateIntervalSeconds;
     if (this.arrowModel) {
       this.arrowModel.visible = true;
-      this.distanceDiv!.style.backgroundColor = "rgba(0, 0, 0, 0.6)";
+      if (this.distanceDiv) {
+        this.distanceDiv.style.backgroundColor = "rgba(0, 0, 0, 0.6)";
+      }
       this.updateArrowRotation();
     }
   }
@@ -91,7 +95,7 @@ export class Navigator {
   }
 
   private calculateDistance() {
-    if (!this.target) return;
+    if (!this.target || !this.distanceDiv) return;
 
     const targetPosition = getWorldPositionForHex(this.target, true);
     const controlsTargetPosition = this.controls.target;
@@ -106,9 +110,9 @@ export class Navigator {
       },
     );
     if (distance) {
-      this.distanceDiv!.textContent = `You are ${distance} hex away`;
+      this.distanceDiv.textContent = `You are ${distance} hex away`;
     } else {
-      this.distanceDiv!.textContent = "You are at the target!";
+      this.distanceDiv.textContent = "You are at the target!";
     }
   }
 

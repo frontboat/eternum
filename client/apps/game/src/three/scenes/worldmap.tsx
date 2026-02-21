@@ -341,7 +341,6 @@ export default class WorldmapScene extends HexagonScene {
   private armyStructureOwners: Map<ID, ID> = new Map();
   private cameraViewportFrameHandle: number | null = null;
   private cameraViewportDirty = false;
-  private minimapCameraMoveQueued = false;
   private updateCameraTargetHex = () => {
     const normalizedHex = this.getCameraTargetHex();
     const contractHex = new Position({ x: normalizedHex.col, y: normalizedHex.row }).getContract();
@@ -367,12 +366,10 @@ export default class WorldmapScene extends HexagonScene {
 
       if (this.sceneManager.getCurrentScene() !== SceneName.WorldMap) return;
 
-      if (this.minimapCameraMoveQueued) {
-        this.minimapCameraMoveQueued = false;
+      if (this.minimapCameraMoveTarget) {
         const target = this.minimapCameraMoveTarget;
-        if (target) {
-          this.moveCameraToColRow(target.col, target.row, 0.25);
-        }
+        this.minimapCameraMoveTarget = null;
+        this.moveCameraToColRow(target.col, target.row, 0.25);
       }
 
       if (this.cameraViewportDirty) {
@@ -392,8 +389,7 @@ export default class WorldmapScene extends HexagonScene {
     const detail = (event as CustomEvent<{ col: number; row: number }>).detail;
     if (!detail) return;
     this.minimapCameraMoveTarget = detail;
-    this.minimapCameraMoveQueued = true;
-    this.markCameraViewportDirty();
+    this.scheduleCameraViewportFrame();
   };
   private minimapZoomHandler = (event: Event) => {
     if (this.sceneManager.getCurrentScene() !== SceneName.WorldMap) return;
@@ -4547,6 +4543,7 @@ export default class WorldmapScene extends HexagonScene {
     this.selectedHexManager.update(deltaTime);
     this.structureManager.updateAnimations(deltaTime, animationContext);
     this.chestManager.update(deltaTime);
+    this.markCameraViewportDirty();
     if (WORLDMAP_ZOOM_HARDENING.terrainSelfHeal) {
       this.monitorTerrainVisibilityHealth();
     } else {
@@ -4914,13 +4911,15 @@ export default class WorldmapScene extends HexagonScene {
     this.toriiBoundsAreaKey = null;
 
     this.resourceFXManager.destroy();
+    this.controls.removeEventListener("change", this.handleControlsChangeForMinimap);
+    window.removeEventListener("minimapCameraMove", this.minimapCameraMoveHandler as EventListener);
+    window.removeEventListener("minimapZoom", this.minimapZoomHandler as EventListener);
     if (this.cameraViewportFrameHandle !== null) {
       cancelAnimationFrame(this.cameraViewportFrameHandle);
       this.cameraViewportFrameHandle = null;
     }
-    this.controls.removeEventListener("change", this.handleControlsChangeForMinimap);
-    window.removeEventListener("minimapCameraMove", this.minimapCameraMoveHandler as EventListener);
-    window.removeEventListener("minimapZoom", this.minimapZoomHandler as EventListener);
+    this.cameraViewportDirty = false;
+    this.minimapCameraMoveTarget = null;
     this.clearCache();
 
     // Clean up selection pulse manager

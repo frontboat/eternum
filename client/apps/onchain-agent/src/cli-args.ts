@@ -17,6 +17,8 @@ export interface CliOptions {
   method?: string;
   username?: string;
   password?: string;
+  callbackUrl?: string;
+  timeout?: number;
   rawArgs: string[];
 }
 
@@ -80,6 +82,8 @@ export function parseCliArgs(args: string[]): CliOptions {
     method: extractFlag(args, "method"),
     username: extractFlag(args, "username"),
     password: extractFlag(args, "password"),
+    callbackUrl: extractFlag(args, "callback-url"),
+    timeout: extractFlag(args, "timeout") ? parseInt(extractFlag(args, "timeout")!, 10) : undefined,
     rawArgs: args,
   };
 }

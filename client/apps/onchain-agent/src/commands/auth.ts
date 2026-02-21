@@ -4,6 +4,8 @@ import { discoverAllWorlds, buildWorldProfile, buildResolvedManifest } from "../
 import { ControllerSession, buildSessionPoliciesFromManifest } from "../session/controller-session";
 import { writeArtifacts, updateAuthStatus } from "../session/artifacts";
 import { deriveChainIdFromRpcUrl } from "../world/normalize";
+import { createApiServer } from "../api/server";
+import { JsonEmitter } from "../output/json-emitter";
 import type { DiscoveredWorld } from "../world/discovery";
 
 interface AuthOptions {
@@ -13,6 +15,8 @@ interface AuthOptions {
   method?: string;
   username?: string;
   password?: string;
+  callbackUrl?: string;
+  timeout?: number;
   json: boolean;
   write: (s: string) => void;
 }
@@ -46,7 +50,6 @@ async function authSingleWorld(
     // 2. Capture auth URL via callback
     let authUrl = "";
     const chainId = deriveChainIdFromRpcUrl(profile.rpcUrl ?? "") ?? config.chainId;
-
     const sessionBasePath = path.join(config.sessionBasePath, world.name);
 
     const session = new ControllerSession({
@@ -56,6 +59,7 @@ async function authSingleWorld(
       basePath: sessionBasePath,
       manifest,
       worldProfile: profile,
+      callbackUrl: options.callbackUrl,
       onAuthUrl: (url) => {
         authUrl = url;
       },
@@ -67,7 +71,7 @@ async function authSingleWorld(
       manifest,
       policy: policies as Record<string, unknown>,
       auth: {
-        url: "", // will be updated after connect triggers URL generation
+        url: "",
         status: "pending",
         worldName: world.name,
         chain: world.chain,
@@ -91,18 +95,45 @@ async function authSingleWorld(
       };
     }
 
-    // 5. Trigger connect (generates auth URL, starts polling)
-    // Run in background so we can capture the URL and optionally auto-approve
+    // 5. If using --callback-url, start an API server to receive the redirect
+    let apiClose: (() => Promise<void>) | null = null;
+    if (options.callbackUrl) {
+      const callbackUrlParsed = new URL(options.callbackUrl);
+      const port = parseInt(callbackUrlParsed.port || "3000", 10);
+      const host = "0.0.0.0"; // Must be externally reachable
+
+      const emitter = new JsonEmitter({ verbosity: "quiet", write: () => {} });
+      const { close } = createApiServer(
+        {
+          enqueuePrompt: async () => {},
+          getStatus: () => ({ phase: "auth", world: world.name }),
+          getState: () => ({}),
+          shutdown: async () => {},
+          applyConfig: async () => ({}),
+          emitter,
+        },
+        port,
+        host,
+        {
+          onCallback: (sessionData: string) => {
+            session.feedCallbackData(sessionData);
+          },
+        },
+      );
+      apiClose = close;
+    }
+
+    // 6. Trigger connect (generates auth URL, waits for callback)
     const connectPromise = session.connect();
 
-    // Wait a moment for the URL to be captured via the callback
+    // Wait a moment for the URL to be captured via the onAuthUrl callback
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     if (authUrl) {
       updateAuthStatus(worldDir, { url: authUrl });
     }
 
-    // 6. If --approve, run auth-approve
+    // 7. If --approve, run auth-approve
     if (options.approve && authUrl) {
       try {
         const { runAuthApprove } = await import("../session/auth-approve");
@@ -114,6 +145,7 @@ async function authSingleWorld(
         });
       } catch (approveErr) {
         const errorMsg = approveErr instanceof Error ? approveErr.message : String(approveErr);
+        if (apiClose) await apiClose();
         updateAuthStatus(worldDir, { status: "pending" });
         return {
           world: world.name,
@@ -126,9 +158,10 @@ async function authSingleWorld(
       }
     }
 
-    // 7. Wait for session approval
+    // 8. Wait for session approval (via localhost callback or external callback URL)
     try {
       const account = await connectPromise;
+      if (apiClose) await apiClose();
       updateAuthStatus(worldDir, {
         status: "active",
         address: account.address,
@@ -142,6 +175,7 @@ async function authSingleWorld(
         artifactDir: worldDir,
       };
     } catch {
+      if (apiClose) await apiClose();
       return {
         world: world.name,
         chain: world.chain,

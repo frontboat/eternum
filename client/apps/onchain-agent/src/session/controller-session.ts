@@ -20,6 +20,8 @@ interface ControllerSessionConfig {
   worldProfile?: WorldProfile;
   /** When set, the auth URL is passed to this callback instead of opening a browser. */
   onAuthUrl?: (url: string) => void;
+  /** Override the redirect URI for the auth callback (e.g. public VPS URL). */
+  callbackUrl?: string;
 }
 
 interface BuildSessionPolicyOptions {
@@ -366,6 +368,8 @@ export function buildSessionPoliciesFromManifest(
 
 export class ControllerSession {
   private provider: SessionProvider;
+  private _callbackPromise?: Promise<string>;
+  private _resolveCallback?: ((data: string) => void) | null;
 
   constructor(config: ControllerSessionConfig) {
     const policies = buildSessionPoliciesFromManifest(config.manifest, {
@@ -379,9 +383,9 @@ export class ControllerSession {
       basePath: config.basePath ?? ".cartridge",
     });
 
-    // Patch openLink: either capture URL via callback or open browser
     const backend = (this.provider as any)._backend;
     if (backend) {
+      // Patch openLink: either capture URL via callback or open browser
       if (config.onAuthUrl) {
         const callback = config.onAuthUrl;
         backend.openLink = (url: string) => {
@@ -392,6 +396,22 @@ export class ControllerSession {
           const openCmd = process.platform === "darwin" ? "open" : "xdg-open";
           execFile(openCmd, [url]);
         };
+      }
+
+      // Override redirect URI when a custom callback URL is provided.
+      // This replaces the localhost callback server with an external URL
+      // (e.g. a public VPS endpoint) so remote browsers can redirect back.
+      if (config.callbackUrl) {
+        const customUrl = config.callbackUrl;
+        // Store a resolver so feedCallbackData() can complete the connect() flow
+        let resolveCallback: ((data: string) => void) | null = null;
+        this._callbackPromise = new Promise<string>((resolve) => {
+          resolveCallback = resolve;
+        });
+        this._resolveCallback = resolveCallback;
+
+        backend.getRedirectUri = async () => customUrl;
+        backend.waitForCallback = () => this._callbackPromise;
       }
     }
   }
@@ -424,6 +444,18 @@ export class ControllerSession {
       );
     }
     return account;
+  }
+
+  /**
+   * Feed session data received from an external callback endpoint.
+   * Used when callbackUrl is set — the API server receives the redirect
+   * and passes the session data here to complete the connect() flow.
+   */
+  feedCallbackData(sessionData: string): void {
+    if (this._resolveCallback) {
+      this._resolveCallback(sessionData);
+      this._resolveCallback = null;
+    }
   }
 
   /**

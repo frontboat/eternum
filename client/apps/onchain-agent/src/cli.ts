@@ -228,6 +228,8 @@ export async function runCli(args: string[] = process.argv.slice(2)): Promise<nu
         method: opts.method,
         username: opts.username,
         password: opts.password,
+        callbackUrl: opts.callbackUrl,
+        timeout: opts.timeout,
         json: opts.json,
         write,
       });

@@ -10,6 +10,11 @@ export interface ApiDeps {
   emitter: JsonEmitter;
 }
 
+export interface AuthCallbackHandler {
+  /** Called when /auth/callback receives session data from Cartridge redirect */
+  onCallback: (sessionData: string) => void;
+}
+
 function respond(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
@@ -28,10 +33,13 @@ export function createApiServer(
   deps: ApiDeps,
   port: number,
   host: string = "127.0.0.1",
+  authCallback?: AuthCallbackHandler,
 ): { server: Server; close: () => Promise<void> } {
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     try {
-      if (req.method === "POST" && req.url === "/prompt") {
+      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+
+      if (req.method === "POST" && url.pathname === "/prompt") {
         const body = await collectBody(req);
         const { content } = JSON.parse(body);
         if (typeof content !== "string" || !content.trim()) {
@@ -40,11 +48,11 @@ export function createApiServer(
         }
         await deps.enqueuePrompt(content);
         respond(res, 200, { queued: true });
-      } else if (req.method === "GET" && req.url === "/status") {
+      } else if (req.method === "GET" && url.pathname === "/status") {
         respond(res, 200, deps.getStatus());
-      } else if (req.method === "GET" && req.url === "/state") {
+      } else if (req.method === "GET" && url.pathname === "/state") {
         respond(res, 200, deps.getState());
-      } else if (req.method === "GET" && req.url === "/events") {
+      } else if (req.method === "GET" && url.pathname === "/events") {
         res.writeHead(200, {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
@@ -54,15 +62,30 @@ export function createApiServer(
           res.write(`data: ${JSON.stringify(event)}\n\n`);
         });
         req.on("close", unsub);
-      } else if (req.method === "POST" && req.url === "/config") {
+      } else if (req.method === "POST" && url.pathname === "/config") {
         const body = await collectBody(req);
         const { changes } = JSON.parse(body);
         const result = await deps.applyConfig(changes);
         respond(res, 200, result);
-      } else if (req.method === "POST" && req.url === "/shutdown") {
+      } else if (req.method === "POST" && url.pathname === "/shutdown") {
         respond(res, 200, { ok: true });
-        // Defer shutdown so the response is sent first
         setImmediate(() => deps.shutdown());
+      } else if (req.method === "GET" && url.pathname === "/auth/callback") {
+        // Cartridge redirects here after the human approves in their browser.
+        // The session data is in the query param specified by redirect_query_name.
+        const sessionData = url.searchParams.get("startapp");
+        if (!sessionData) {
+          res.writeHead(400, { "Content-Type": "text/html" });
+          res.end("<html><body>Missing session data in callback.</body></html>");
+          return;
+        }
+        if (authCallback) {
+          authCallback.onCallback(sessionData);
+        }
+        res.writeHead(200, { "Content-Type": "text/html" });
+        res.end(
+          "<html><body><script>window.close();</script>Session registered successfully. You can close this window.</body></html>",
+        );
       } else {
         respond(res, 404, { error: "not found" });
       }

@@ -10,6 +10,7 @@ import { runWorlds } from "./commands/worlds";
 import { runAuth } from "./commands/auth";
 import { runAuthStatus } from "./commands/auth-status";
 import { runAuthUrl } from "./commands/auth-url";
+import { runAuthComplete } from "./commands/auth-complete";
 
 const CLI_COMMAND = "axis";
 const PAD = "  ";
@@ -39,27 +40,39 @@ function printUsage() {
   console.log(`Usage: ${CLI_COMMAND} <command> [options]
 
 Commands:
-  run                     Run agent (TUI mode, default)
-  run --headless          Run agent headlessly with JSON output
-  worlds                  List discovered worlds
-  auth <world|--all>      Generate auth URL and persist artifacts
-  auth-status <world>     Check session validity
-  auth-url <world>        Print auth URL
-  doctor                  Check configuration
-  init                    Initialize data directories
+  run                       Run agent (TUI mode, default)
+  run --headless            Run agent headlessly with JSON output
+  worlds                    List discovered worlds
+  auth <world|--all>        Generate auth URL and persist artifacts
+  auth-complete <world>     Complete auth with redirect URL or session data
+  auth-status <world>       Check session validity
+  auth-url <world>          Print auth URL
+  doctor                    Check configuration
+  init                      Initialize data directories
 
-Options:
-  --json                  JSON output
-  --headless              Headless mode (no TUI)
-  --world=<name>          Target world
-  --auth=session|privatekey  Auth strategy (default: session)
-  --api-port=<port>       Enable HTTP API
-  --stdin                 Enable stdin steering
-  --verbosity=<level>     Output verbosity (quiet|actions|decisions|all)
-  --approve               Auto-approve via agent-browser
-  --all                   Apply to all discovered worlds
-  --version, -v           Print version
-  --help, -h              Print this help`);
+Auth options:
+  --callback-url=<url>      Public URL for auth callback (remote VPS)
+  --redirect-url=<url>      Paste redirect URL to complete auth offline
+  --session-data=<base64>   Raw session data to complete auth
+  --approve                 Auto-approve via agent-browser
+  --method=<type>           Auth method for --approve (password)
+  --username=<user>         Username for --approve
+  --password=<pass>         Password for --approve
+  --all                     Apply to all discovered worlds
+
+Run options:
+  --headless                Headless mode (no TUI)
+  --world=<name>            Target world
+  --auth=session|privatekey Auth strategy (default: session)
+  --api-port=<port>         Enable HTTP API
+  --api-host=<host>         API bind address (default: 127.0.0.1)
+  --stdin                   Enable stdin steering
+  --verbosity=<level>       Output verbosity (quiet|actions|decisions|all)
+
+General:
+  --json                    JSON output
+  --version, -v             Print version
+  --help, -h                Print this help`);
 }
 
 function printBanner() {
@@ -230,6 +243,15 @@ export async function runCli(args: string[] = process.argv.slice(2)): Promise<nu
         password: opts.password,
         callbackUrl: opts.callbackUrl,
         timeout: opts.timeout,
+        json: opts.json,
+        write,
+      });
+
+    case "auth-complete":
+      return runAuthComplete({
+        world: opts.world,
+        sessionData: opts.sessionData,
+        redirectUrl: opts.redirectUrl,
         json: opts.json,
         write,
       });

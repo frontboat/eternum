@@ -91,7 +91,33 @@ export async function mainHeadless(options: CliOptions): Promise<void> {
       manifest: artifacts.manifest,
       worldProfile: artifacts.profile,
     });
-    account = await session.connect();
+
+    // Try probe() first (uses SessionAccount WASM). If it crashes (starknet v8
+    // compatibility issue), fall back to constructing a raw Account from the
+    // stored session keypair — loses session/paymaster features but works.
+    try {
+      const probed = await session.probe();
+      if (probed) {
+        account = probed;
+      } else {
+        // No cached session — need full connect (browser auth)
+        account = await session.connect();
+      }
+    } catch (probeError) {
+      // SessionAccount WASM crashed — fall back to raw account from session.json
+      emitter.emit({ type: "error", message: `probe() failed: ${probeError instanceof Error ? probeError.stack ?? probeError.message : String(probeError)}` });
+      const sessionFilePath = path.join(sessionBasePath, "session.json");
+      try {
+        const raw = readFileSync(sessionFilePath, "utf-8");
+        const data = JSON.parse(raw);
+        const signer = JSON.parse(data.signer);
+        const sess = JSON.parse(data.session);
+        account = createPrivateKeyAccount(config.rpcUrl, signer.privKey, sess.address);
+        emitter.emit({ type: "session", status: "active", message: "Using raw session keypair (WASM fallback)" });
+      } catch (fallbackErr) {
+        throw new Error(`Session probe failed and fallback failed: ${fallbackErr}`);
+      }
+    }
   }
 
   // Create Eternum client

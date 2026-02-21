@@ -1,4 +1,4 @@
-export type Command = "run" | "worlds" | "auth" | "auth-status" | "auth-url" | "doctor" | "init" | "version" | "help" | "unknown";
+export type Command = "run" | "worlds" | "auth" | "auth-complete" | "auth-status" | "auth-url" | "doctor" | "init" | "version" | "help" | "unknown";
 export type AuthMode = "session" | "privatekey";
 export type Verbosity = "quiet" | "actions" | "decisions" | "all";
 
@@ -19,10 +19,12 @@ export interface CliOptions {
   password?: string;
   callbackUrl?: string;
   timeout?: number;
+  sessionData?: string;
+  redirectUrl?: string;
   rawArgs: string[];
 }
 
-const COMMANDS = new Set<Command>(["run", "worlds", "auth", "auth-status", "auth-url", "doctor", "init"]);
+const COMMANDS = new Set<Command>(["run", "worlds", "auth", "auth-complete", "auth-status", "auth-url", "doctor", "init"]);
 
 const VALID_VERBOSITIES = new Set<Verbosity>(["quiet", "actions", "decisions", "all"]);
 
@@ -52,7 +54,7 @@ export function parseCliArgs(args: string[]): CliOptions {
     command = "help";
   } else if (COMMANDS.has(firstArg as Command)) {
     command = firstArg as Command;
-    if (["auth", "auth-status", "auth-url"].includes(command)) {
+    if (["auth", "auth-complete", "auth-status", "auth-url"].includes(command)) {
       const secondArg = args[1];
       if (secondArg && !secondArg.startsWith("--")) {
         positionalWorld = secondArg;
@@ -84,6 +86,8 @@ export function parseCliArgs(args: string[]): CliOptions {
     password: extractFlag(args, "password"),
     callbackUrl: extractFlag(args, "callback-url"),
     timeout: extractFlag(args, "timeout") ? parseInt(extractFlag(args, "timeout")!, 10) : undefined,
+    sessionData: extractFlag(args, "session-data"),
+    redirectUrl: extractFlag(args, "redirect-url"),
     rawArgs: args,
   };
 }

@@ -131,6 +131,27 @@ async function authSingleWorld(
 
     if (authUrl) {
       updateAuthStatus(worldDir, { url: authUrl });
+
+      // Emit the URL immediately so an AI agent can read it from stdout
+      // before the callback completes. This is the key for programmatic use.
+      if (options.json) {
+        options.write(JSON.stringify({
+          world: world.name,
+          chain: world.chain,
+          status: "awaiting_approval",
+          url: authUrl,
+          callbackUrl: options.callbackUrl ?? null,
+          artifactDir: worldDir,
+        }));
+        // Flush — ensure the line is written before we block on connect
+        options.write("");
+      } else {
+        options.write(`  Approve at: ${authUrl}\n`);
+        if (options.callbackUrl) {
+          options.write(`  Callback listening at: ${options.callbackUrl}\n`);
+        }
+        options.write(`  Waiting for approval...\n`);
+      }
     }
 
     // 7. If --approve, run auth-approve

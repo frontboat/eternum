@@ -5,6 +5,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config";
 import { resolveBundledPath } from "./runtime-paths";
+import { parseCliArgs } from "./cli-args";
+import { runWorlds } from "./commands/worlds";
+import { runAuth } from "./commands/auth";
+import { runAuthStatus } from "./commands/auth-status";
+import { runAuthUrl } from "./commands/auth-url";
 
 const CLI_COMMAND = "axis";
 const PAD = "  ";
@@ -31,7 +36,30 @@ function readVersion(): string {
 }
 
 function printUsage() {
-  console.log(`Usage: ${CLI_COMMAND} [--version|doctor|init|run]`);
+  console.log(`Usage: ${CLI_COMMAND} <command> [options]
+
+Commands:
+  run                     Run agent (TUI mode, default)
+  run --headless          Run agent headlessly with JSON output
+  worlds                  List discovered worlds
+  auth <world|--all>      Generate auth URL and persist artifacts
+  auth-status <world>     Check session validity
+  auth-url <world>        Print auth URL
+  doctor                  Check configuration
+  init                    Initialize data directories
+
+Options:
+  --json                  JSON output
+  --headless              Headless mode (no TUI)
+  --world=<name>          Target world
+  --auth=session|privatekey  Auth strategy (default: session)
+  --api-port=<port>       Enable HTTP API
+  --stdin                 Enable stdin steering
+  --verbosity=<level>     Output verbosity (quiet|actions|decisions|all)
+  --approve               Auto-approve via agent-browser
+  --all                   Apply to all discovered worlds
+  --version, -v           Print version
+  --help, -h              Print this help`);
 }
 
 function printBanner() {
@@ -171,41 +199,80 @@ function runInit(): number {
 }
 
 export async function runCli(args: string[] = process.argv.slice(2)): Promise<number> {
-  const [firstArg] = args;
+  const opts = parseCliArgs(args);
+  const write = (s: string) => console.log(s);
 
-  if (!firstArg || firstArg === "run") {
-    printBanner();
-    try {
-      const { main } = await import("./index");
-      await main();
+  switch (opts.command) {
+    case "version":
+      console.log(readVersion());
       return 0;
-    } catch (error) {
-      console.error("Fatal error:", error);
+
+    case "help":
+      printUsage();
+      return 0;
+
+    case "doctor":
+      return runDoctor();
+
+    case "init":
+      return runInit();
+
+    case "worlds":
+      return runWorlds({ json: opts.json, write });
+
+    case "auth":
+      return runAuth({
+        world: opts.world,
+        all: opts.all,
+        approve: opts.approve,
+        method: opts.method,
+        username: opts.username,
+        password: opts.password,
+        json: opts.json,
+        write,
+      });
+
+    case "auth-status":
+      return runAuthStatus({
+        world: opts.world,
+        all: opts.all,
+        json: opts.json,
+        write,
+      });
+
+    case "auth-url":
+      return runAuthUrl({ world: opts.world, write });
+
+    case "run":
+      if (opts.headless) {
+        if (!opts.world) {
+          console.error("--world=<name> is required for headless mode. Run 'axis auth <world>' first.");
+          return 1;
+        }
+        try {
+          const { mainHeadless } = await import("./headless");
+          await mainHeadless(opts);
+          return 0;
+        } catch (error) {
+          console.error("Fatal error:", error);
+          return 1;
+        }
+      }
+      printBanner();
+      try {
+        const { main } = await import("./index");
+        await main();
+        return 0;
+      } catch (error) {
+        console.error("Fatal error:", error);
+        return 1;
+      }
+
+    default:
+      console.error(`Unknown command: ${args[0]}`);
+      printUsage();
       return 1;
-    }
   }
-
-  if (firstArg === "--version" || firstArg === "-v") {
-    console.log(readVersion());
-    return 0;
-  }
-
-  if (firstArg === "doctor") {
-    return runDoctor();
-  }
-
-  if (firstArg === "init") {
-    return runInit();
-  }
-
-  if (firstArg === "help" || firstArg === "--help" || firstArg === "-h") {
-    printUsage();
-    return 0;
-  }
-
-  console.error(`Unknown command: ${firstArg}`);
-  printUsage();
-  return 1;
 }
 
 function isDirectExecution(metaUrl: string): boolean {

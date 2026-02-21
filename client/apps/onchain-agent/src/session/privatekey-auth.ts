@@ -1,4 +1,4 @@
-import { Account } from "starknet";
+import { Account, RpcProvider } from "starknet";
 
 /**
  * Create a starknet Account from a private key.
@@ -12,5 +12,6 @@ export function createPrivateKeyAccount(rpcUrl: string, privateKey: string, addr
   if (!address) {
     throw new Error("ACCOUNT_ADDRESS environment variable is required for --auth=privatekey");
   }
-  return new Account({ nodeUrl: rpcUrl, address, privateKey });
+  const provider = new RpcProvider({ nodeUrl: rpcUrl });
+  return new Account({ provider, address, signer: privateKey });
 }

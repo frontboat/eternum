@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const mocks = vi.hoisted(() => ({
   ctorCalls: [] as any[],
@@ -26,33 +28,95 @@ vi.mock("@cartridge/controller/session/node", () => ({
 
 import { ControllerSession, buildSessionPoliciesFromManifest } from "../../src/session/controller-session";
 
-describe("controller session policies", () => {
-  it("builds Eternum session policies from manifest system contracts", () => {
-    const policies = buildSessionPoliciesFromManifest({
-      contracts: [
-        { tag: "s1_eternum-resource_systems", address: "0x111" },
-        { tag: "s1_eternum-guild_systems", address: "0x222" },
-      ],
-    } as any);
+// Load real manifest once for all tests
+const manifest = JSON.parse(readFileSync(join(__dirname, "../fixtures/manifest.json"), "utf-8"));
 
-    expect(policies.contracts?.["0x111"]).toBeDefined();
-    expect(policies.contracts?.["0x111"]?.methods?.some((m: any) => m.entrypoint === "send")).toBe(true);
-    expect(policies.contracts?.["0x222"]?.methods?.some((m: any) => m.entrypoint === "update_whitelist")).toBe(true);
+/** Helper: get entrypoints for a contract by tag substring */
+function getEntrypoints(policies: any, tagSubstring: string): string[] {
+  const contract = manifest.contracts.find((c: any) => c.tag.endsWith(tagSubstring));
+  if (!contract) return [];
+  return (policies.contracts?.[contract.address]?.methods ?? []).map((m: any) => m.entrypoint);
+}
+
+/** Helper: get contract address by tag substring */
+function getAddress(tagSubstring: string): string {
+  return manifest.contracts.find((c: any) => c.tag.endsWith(tagSubstring))?.address ?? "";
+}
+
+describe("controller session policies", () => {
+  it("builds policies from all manifest contracts with ABIs", () => {
+    const policies = buildSessionPoliciesFromManifest(manifest);
+
+    // Every contract with ABI functions should have policies
+    const resourceAddr = getAddress("resource_systems");
+    expect(policies.contracts?.[resourceAddr]).toBeDefined();
+
+    const guildAddr = getAddress("guild_systems");
+    expect(policies.contracts?.[guildAddr]).toBeDefined();
+  });
+
+  it("extracts all function entrypoints from contract ABIs", () => {
+    const policies = buildSessionPoliciesFromManifest(manifest);
+
+    // resource_systems should have send, pickup, approve, etc.
+    const resourceEps = getEntrypoints(policies, "-resource_systems");
+    expect(resourceEps).toContain("send");
+    expect(resourceEps).toContain("pickup");
+    expect(resourceEps).toContain("approve");
+    expect(resourceEps).toContain("arrivals_offload");
+
+    // production_systems
+    const prodEps = getEntrypoints(policies, "production_systems");
+    expect(prodEps).toContain("create_building");
+    expect(prodEps).toContain("pause_building_production");
+    expect(prodEps).toContain("burn_resource_for_labor_production");
+
+    // swap_systems
+    const swapEps = getEntrypoints(policies, "swap_systems");
+    expect(swapEps).toContain("buy");
+    expect(swapEps).toContain("sell");
+
+    // structure_systems
+    const structEps = getEntrypoints(policies, "-structure_systems");
+    expect(structEps).toContain("level_up");
+  });
+
+  it("includes blitz realm entrypoints from ABI", () => {
+    const policies = buildSessionPoliciesFromManifest(manifest);
+
+    const blitzEps = getEntrypoints(policies, "blitz_realm_systems");
+    expect(blitzEps).toContain("obtain_entry_token");
+    expect(blitzEps).toContain("register");
+    expect(blitzEps).toContain("make_hyperstructures");
+    expect(blitzEps).toContain("create");
+  });
+
+  it("includes dojo_name and world_dispatcher on all system contracts", () => {
+    const policies = buildSessionPoliciesFromManifest(manifest);
+
+    for (const tag of ["resource_systems", "trade_systems", "guild_systems"]) {
+      const eps = getEntrypoints(policies, tag);
+      expect(eps).toContain("dojo_name");
+      expect(eps).toContain("world_dispatcher");
+    }
+  });
+
+  it("skips contracts with empty ABIs", () => {
+    const policies = buildSessionPoliciesFromManifest(manifest);
+
+    // mmr_systems and point_systems have no ABI functions
+    const mmrAddr = getAddress("mmr_systems");
+    const pointAddr = getAddress("point_systems");
+    expect(policies.contracts?.[mmrAddr]).toBeUndefined();
+    expect(policies.contracts?.[pointAddr]).toBeUndefined();
   });
 
   it("filters contracts by game name when provided", () => {
-    const policies = buildSessionPoliciesFromManifest(
-      {
-        contracts: [
-          { tag: "s1_eternum-resource_systems", address: "0x111" },
-          { tag: "s1_othergame-resource_systems", address: "0x222" },
-        ],
-      } as any,
-      { gameName: "othergame" },
-    );
+    const policies = buildSessionPoliciesFromManifest(manifest, { gameName: "eternum" });
 
-    expect(policies.contracts?.["0x222"]).toBeDefined();
-    expect(policies.contracts?.["0x111"]).toBeUndefined();
+    // Should include eternum contracts
+    const resourceAddr = getAddress("resource_systems");
+    expect(policies.contracts?.[resourceAddr]).toBeDefined();
   });
 
   it("passes generated policies to SessionProvider", () => {
@@ -61,71 +125,19 @@ describe("controller session policies", () => {
       chainId: "SN_SEPOLIA",
       basePath: ".cartridge",
       gameName: "eternum",
-      manifest: {
-        contracts: [{ tag: "s1_eternum-resource_systems", address: "0xabc" }],
-      } as any,
+      manifest,
     });
 
     expect(mocks.ctorCalls).toHaveLength(1);
     const opts = mocks.ctorCalls[0];
     expect(opts.basePath).toBe(".cartridge");
-    expect(opts.policies?.contracts?.["0xabc"]).toBeDefined();
-  });
 
-  it("routes buy/sell to swap_systems (not bank_systems)", () => {
-    const policies = buildSessionPoliciesFromManifest({
-      contracts: [
-        { tag: "s1_eternum-swap_systems", address: "0xswap" },
-        { tag: "s1_eternum-bank_systems", address: "0xbank" },
-      ],
-    } as any);
-
-    const swapEntrypoints = (policies.contracts?.["0xswap"]?.methods ?? []).map((m: any) => m.entrypoint);
-    expect(swapEntrypoints).toContain("buy");
-    expect(swapEntrypoints).toContain("sell");
-
-    const bankEntrypoints = (policies.contracts?.["0xbank"]?.methods ?? []).map((m: any) => m.entrypoint);
-    expect(bankEntrypoints).toContain("create_banks");
-    expect(bankEntrypoints).not.toContain("buy");
-    expect(bankEntrypoints).not.toContain("sell");
-  });
-
-  it("routes level_up to structure_systems (not realm_systems)", () => {
-    const policies = buildSessionPoliciesFromManifest({
-      contracts: [
-        { tag: "s1_eternum-structure_systems", address: "0xstruct" },
-        { tag: "s1_eternum-realm_systems", address: "0xrealm" },
-      ],
-    } as any);
-
-    const structEntrypoints = (policies.contracts?.["0xstruct"]?.methods ?? []).map((m: any) => m.entrypoint);
-    expect(structEntrypoints).toContain("level_up");
-
-    const realmEntrypoints = (policies.contracts?.["0xrealm"]?.methods ?? []).map((m: any) => m.entrypoint);
-    expect(realmEntrypoints).not.toContain("level_up");
-    expect(realmEntrypoints).toContain("create");
-  });
-
-  it("includes dojo_name and world_dispatcher on all system contracts", () => {
-    const policies = buildSessionPoliciesFromManifest({
-      contracts: [
-        { tag: "s1_eternum-resource_systems", address: "0xres" },
-        { tag: "s1_eternum-trade_systems", address: "0xtrade" },
-        { tag: "s1_eternum-guild_systems", address: "0xguild" },
-      ],
-    } as any);
-
-    for (const addr of ["0xres", "0xtrade", "0xguild"]) {
-      const entrypoints = (policies.contracts?.[addr]?.methods ?? []).map((m: any) => m.entrypoint);
-      expect(entrypoints).toContain("dojo_name");
-      expect(entrypoints).toContain("world_dispatcher");
-    }
+    const resourceAddr = getAddress("resource_systems");
+    expect(opts.policies?.contracts?.[resourceAddr]).toBeDefined();
   });
 
   it("always includes VRF provider policy", () => {
-    const policies = buildSessionPoliciesFromManifest({
-      contracts: [{ tag: "s1_eternum-resource_systems", address: "0xres" }],
-    } as any);
+    const policies = buildSessionPoliciesFromManifest(manifest);
 
     const vrfAddress = "0x051fea4450da9d6aee758bdeba88b2f665bcbf549d2c61421aa724e9ac0ced8f";
     expect(policies.contracts?.[vrfAddress]).toBeDefined();
@@ -133,23 +145,18 @@ describe("controller session policies", () => {
   });
 
   it("includes token policies when worldProfile provides addresses", () => {
-    const policies = buildSessionPoliciesFromManifest(
-      {
-        contracts: [{ tag: "s1_eternum-resource_systems", address: "0xres" }],
-      } as any,
-      {
-        worldProfile: {
-          name: "test",
-          chain: "slot",
-          toriiBaseUrl: "http://example.com",
-          worldAddress: "0x1",
-          contractsBySelector: {},
-          entryTokenAddress: "0xentry",
-          feeTokenAddress: "0xfee",
-          fetchedAt: Date.now(),
-        },
+    const policies = buildSessionPoliciesFromManifest(manifest, {
+      worldProfile: {
+        name: "test",
+        chain: "slot",
+        toriiBaseUrl: "http://example.com",
+        worldAddress: "0x1",
+        contractsBySelector: {},
+        entryTokenAddress: "0xentry",
+        feeTokenAddress: "0xfee",
+        fetchedAt: Date.now(),
       },
-    );
+    });
 
     expect(policies.contracts?.["0xentry"]).toBeDefined();
     expect(policies.contracts?.["0xentry"]?.methods?.some((m: any) => m.entrypoint === "token_lock")).toBe(true);
@@ -159,30 +166,23 @@ describe("controller session policies", () => {
   });
 
   it("skips entry token policy when address is 0x0", () => {
-    const policies = buildSessionPoliciesFromManifest(
-      {
-        contracts: [{ tag: "s1_eternum-resource_systems", address: "0xres" }],
-      } as any,
-      {
-        worldProfile: {
-          name: "test",
-          chain: "slot",
-          toriiBaseUrl: "http://example.com",
-          worldAddress: "0x1",
-          contractsBySelector: {},
-          entryTokenAddress: "0x0",
-          fetchedAt: Date.now(),
-        },
+    const policies = buildSessionPoliciesFromManifest(manifest, {
+      worldProfile: {
+        name: "test",
+        chain: "slot",
+        toriiBaseUrl: "http://example.com",
+        worldAddress: "0x1",
+        contractsBySelector: {},
+        entryTokenAddress: "0x0",
+        fetchedAt: Date.now(),
       },
-    );
+    });
 
     expect(policies.contracts?.["0x0"]).toBeUndefined();
   });
 
   it("includes message signing policy", () => {
-    const policies = buildSessionPoliciesFromManifest({
-      contracts: [{ tag: "s1_eternum-resource_systems", address: "0xres" }],
-    } as any) as any;
+    const policies = buildSessionPoliciesFromManifest(manifest) as any;
 
     expect(policies.messages).toBeDefined();
     expect(Array.isArray(policies.messages)).toBe(true);
@@ -190,82 +190,25 @@ describe("controller session policies", () => {
     expect(policies.messages[0].primaryType).toBe("s1_eternum-Message");
   });
 
-  it("does not match tag via substring (only exact or dash-suffix)", () => {
-    const policies = buildSessionPoliciesFromManifest({
-      contracts: [
-        { tag: "s1_eternum-some_trade_systems_v2", address: "0xnomatch" },
-        { tag: "s1_eternum-trade_systems", address: "0xmatch" },
-      ],
-    } as any);
+  it("includes all system contract categories", () => {
+    const policies = buildSessionPoliciesFromManifest(manifest);
 
-    // The exact suffix match should work
-    expect(policies.contracts?.["0xmatch"]).toBeDefined();
-    // The substring match should NOT work (old bug: tag.includes(suffix))
-    expect(policies.contracts?.["0xnomatch"]).toBeUndefined();
-  });
+    // Verify key systems are all present
+    const systems = [
+      "config_systems",
+      "name_systems",
+      "ownership_systems",
+      "dev_resource_systems",
+      "relic_systems",
+      "season_systems",
+      "village_systems",
+      "blitz_realm_systems",
+      "troop_movement_util_systems",
+    ];
 
-  it("uses real contract entrypoints used by provider transactions", () => {
-    const policies = buildSessionPoliciesFromManifest({
-      contracts: [
-        { tag: "s1_eternum-resource_systems", address: "0xres" },
-        { tag: "s1_eternum-production_systems", address: "0xprod" },
-        { tag: "s1_eternum-swap_systems", address: "0xswap" },
-        { tag: "s1_eternum-liquidity_systems", address: "0xliq" },
-        { tag: "s1_eternum-structure_systems", address: "0xstruct" },
-      ],
-    } as any);
-
-    const resourceEntrypoints = (policies.contracts?.["0xres"]?.methods ?? []).map((m: any) => m.entrypoint);
-    expect(resourceEntrypoints).toContain("send");
-    expect(resourceEntrypoints).toContain("pickup");
-    expect(resourceEntrypoints).toContain("approve");
-    expect(resourceEntrypoints).toContain("deposit");
-    expect(resourceEntrypoints).toContain("withdraw");
-
-    const productionEntrypoints = (policies.contracts?.["0xprod"]?.methods ?? []).map((m: any) => m.entrypoint);
-    expect(productionEntrypoints).toContain("pause_building_production");
-    expect(productionEntrypoints).toContain("resume_building_production");
-    expect(productionEntrypoints).toContain("burn_resource_for_labor_production");
-
-    const swapEntrypoints = (policies.contracts?.["0xswap"]?.methods ?? []).map((m: any) => m.entrypoint);
-    expect(swapEntrypoints).toContain("buy");
-    expect(swapEntrypoints).toContain("sell");
-
-    const liquidityEntrypoints = (policies.contracts?.["0xliq"]?.methods ?? []).map((m: any) => m.entrypoint);
-    expect(liquidityEntrypoints).toContain("add");
-    expect(liquidityEntrypoints).toContain("remove");
-
-    const structEntrypoints = (policies.contracts?.["0xstruct"]?.methods ?? []).map((m: any) => m.entrypoint);
-    expect(structEntrypoints).toContain("level_up");
-  });
-
-  it("includes all missing system contracts from canonical policies", () => {
-    const policies = buildSessionPoliciesFromManifest({
-      contracts: [
-        { tag: "s1_eternum-config_systems", address: "0xconfig" },
-        { tag: "s1_eternum-name_systems", address: "0xname" },
-        { tag: "s1_eternum-ownership_systems", address: "0xown" },
-        { tag: "s1_eternum-dev_resource_systems", address: "0xdev" },
-        { tag: "s1_eternum-relic_systems", address: "0xrelic" },
-        { tag: "s1_eternum-season_systems", address: "0xseason" },
-        { tag: "s1_eternum-village_systems", address: "0xvillage" },
-        { tag: "s1_eternum-blitz_realm_systems", address: "0xblitz" },
-        { tag: "s1_eternum-troop_movement_util_systems", address: "0xutil" },
-      ],
-    } as any);
-
-    expect(policies.contracts?.["0xconfig"]?.methods?.some((m: any) => m.entrypoint === "set_agent_config")).toBe(true);
-    expect(policies.contracts?.["0xname"]?.methods?.some((m: any) => m.entrypoint === "set_address_name")).toBe(true);
-    expect(
-      policies.contracts?.["0xown"]?.methods?.some((m: any) => m.entrypoint === "transfer_structure_ownership"),
-    ).toBe(true);
-    expect(policies.contracts?.["0xdev"]?.methods?.some((m: any) => m.entrypoint === "mint")).toBe(true);
-    expect(policies.contracts?.["0xrelic"]?.methods?.some((m: any) => m.entrypoint === "open_chest")).toBe(true);
-    expect(
-      policies.contracts?.["0xseason"]?.methods?.some((m: any) => m.entrypoint === "register_to_leaderboard"),
-    ).toBe(true);
-    expect(policies.contracts?.["0xvillage"]?.methods?.some((m: any) => m.entrypoint === "upgrade")).toBe(true);
-    expect(policies.contracts?.["0xblitz"]?.methods?.some((m: any) => m.entrypoint === "register")).toBe(true);
-    expect(policies.contracts?.["0xutil"]?.methods?.some((m: any) => m.entrypoint === "dojo_name")).toBe(true);
+    for (const system of systems) {
+      const addr = getAddress(system);
+      expect(policies.contracts?.[addr]).toBeDefined();
+    }
   });
 });

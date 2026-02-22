@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import SessionProvider from "@cartridge/controller/session/node";
 import type { WalletAccount } from "starknet";
 import type { WorldProfile } from "../world/types";
+import { extractFromABI, tagMatchesGame } from "../abi/parser";
 
 type SessionPolicies = ConstructorParameters<typeof SessionProvider>[0]["policies"];
 
@@ -50,16 +51,6 @@ function normalizeGameName(value: unknown): string | null {
   return normalized || null;
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function tagMatchesGame(tag: string, gameName: string | null): boolean {
-  if (!gameName) return true;
-  const pattern = new RegExp(`(?:^|_)${escapeRegExp(gameName)}-`);
-  return pattern.test(tag);
-}
-
 function buildMessageSigningPolicy(chain: string): Array<Record<string, unknown>> {
   const chainDomain = chain === "mainnet" ? "SN_MAIN" : "SN_SEPOLIA";
   return [
@@ -93,24 +84,14 @@ function buildMessageSigningPolicy(chain: string): Array<Record<string, unknown>
 }
 
 /**
- * Extract all function entrypoints from a contract's ABI.
- * Reads interface items of type "function" and returns them as PolicyMethods.
+ * Build session policies by extracting ALL external entrypoints from each
+ * contract's ABI in the manifest. This replaces the old hardcoded
+ * POLICY_METHODS_BY_SUFFIX table with dynamic ABI-driven extraction.
+ *
+ * For every contract that has an ABI, all external functions (both framework
+ * and game-specific) are registered as policy methods. This ensures the
+ * session key is authorized for every possible contract call.
  */
-function extractEntrypointsFromAbi(abi: unknown[]): PolicyMethod[] {
-  const methods: PolicyMethod[] = [];
-  for (const entry of abi) {
-    const item = entry as Record<string, unknown>;
-    if (item.type === "interface" && Array.isArray(item.items)) {
-      for (const fn of item.items as Record<string, unknown>[]) {
-        if (fn.type === "function" && typeof fn.name === "string") {
-          methods.push({ name: fn.name, entrypoint: fn.name });
-        }
-      }
-    }
-  }
-  return methods;
-}
-
 export function buildSessionPoliciesFromManifest(
   manifest: SessionManifest,
   options: BuildSessionPolicyOptions = {},
@@ -127,17 +108,40 @@ export function buildSessionPoliciesFromManifest(
     if (!tag || !address) continue;
     if (!tagMatchesGame(tag, gameName)) continue;
 
-    // Extract every function entrypoint from the contract ABI
-    const abi = Array.isArray(item.abi) ? item.abi : [];
-    const methods = extractEntrypointsFromAbi(abi);
+    const abi = item.abi as unknown[] | undefined;
+    if (!abi || !Array.isArray(abi) || abi.length === 0) continue;
+
+    const { entrypoints } = extractFromABI(abi);
+    const methods: PolicyMethod[] = entrypoints
+      .filter((ep) => ep.state_mutability === "external")
+      .map((ep) => ({
+        name: ep.name,
+        entrypoint: ep.name,
+      }));
+
     if (methods.length === 0) continue;
 
-    contracts[address] = { methods };
+    const existing = contracts[address]?.methods ?? [];
+    const mergedByEntrypoint = new Map<string, PolicyMethod>();
+    for (const m of existing) mergedByEntrypoint.set(m.entrypoint, m);
+    for (const m of methods) mergedByEntrypoint.set(m.entrypoint, m);
+
+    contracts[address] = {
+      methods: Array.from(mergedByEntrypoint.values()),
+    };
+  }
+
+  // Check that we found at least one ABI-based contract before adding special policies
+  if (Object.keys(contracts).length === 0) {
+    const gameSuffix = gameName ? ` for game '${gameName}'` : "";
+    throw new Error(
+      `Could not derive Controller session policies from manifest${gameSuffix}: no recognized system contracts found`,
+    );
   }
 
   // Add VRF provider policy
   contracts[VRF_PROVIDER_ADDRESS] = {
-    methods: [{ name: "VRF", entrypoint: "request_random", description: "Verifiable Random Function" }],
+    methods: [{ name: "VRF", entrypoint: "request_random" }],
   };
 
   // Add token policies from WorldProfile
@@ -150,13 +154,6 @@ export function buildSessionPoliciesFromManifest(
     contracts[profile.feeTokenAddress] = {
       methods: [{ name: "approve", entrypoint: "approve" }],
     };
-  }
-
-  if (Object.keys(contracts).length === 0) {
-    const gameSuffix = gameName ? ` for game '${gameName}'` : "";
-    throw new Error(
-      `Could not derive Controller session policies from manifest${gameSuffix}: no recognized system contracts found`,
-    );
   }
 
   const chain = profile?.chain ?? "slot";
@@ -200,7 +197,6 @@ export class ControllerSession {
       // (e.g. a public VPS endpoint) so remote browsers can redirect back.
       if (config.callbackUrl) {
         const customUrl = config.callbackUrl;
-        // Store a resolver so feedCallbackData() can complete the connect() flow
         let resolveCallback: ((data: string) => void) | null = null;
         this._callbackPromise = new Promise<string>((resolve) => {
           resolveCallback = resolve;

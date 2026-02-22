@@ -1166,6 +1166,76 @@ register(
 );
 
 // ---------------------------------------------------------------------------
+// Blitz Setup (registration, settlement, game initialization)
+// ---------------------------------------------------------------------------
+
+register(
+  "obtain_entry_token",
+  "Pay the entry fee to receive an NFT entry token required for Blitz registration. Must be called before 'register'. " +
+    "No parameters needed — fee token and amount are resolved from the world profile.",
+  [],
+  (client, signer, _p) =>
+    wrapTx(() => (client.provider as any).blitz_realm_obtain_entry_token({ signer })),
+);
+
+register(
+  "register",
+  "Register for a Blitz game. Requires an entry token (from obtain_entry_token). " +
+    "Provides your player name and token ID to join the game.",
+  [
+    s("name", "Player/realm name (short string, will be converted to felt)"),
+    n("tokenId", "Entry token ID received from obtain_entry_token"),
+    s("entryTokenAddress", "Entry token contract address (from world profile)", false),
+    n("lockId", "Token lock ID (default 69)", false),
+  ],
+  (client, signer, p) =>
+    wrapTx(() =>
+      (client.provider as any).blitz_realm_register({
+        signer,
+        name: bigNumberish(p.name),
+        tokenId: bigNumberish(p.tokenId),
+        entryTokenAddress: p.entryTokenAddress ? str(p.entryTokenAddress) : undefined,
+        lockId: p.lockId != null ? num(p.lockId) : undefined,
+      }),
+    ),
+);
+
+register(
+  "settle_realms",
+  "Settle your realm(s) after registration, creating your initial structure with starting resources. " +
+    "This is what gives you your first entity to build and explore from.",
+  [n("settlementCount", "Number of realms to settle (usually 1)")],
+  (client, signer, p) =>
+    wrapTx(() =>
+      (client.provider as any).blitz_realm_settle_realms({
+        signer,
+        settlement_count: num(p.settlementCount),
+      }),
+    ),
+);
+
+register(
+  "assign_realm_positions",
+  "Randomize realm spawn positions on the map using VRF. Typically called by the game host, not individual players.",
+  [],
+  (client, signer, _p) =>
+    wrapTx(() => (client.provider as any).blitz_realm_assign_realm_positions({ signer })),
+);
+
+register(
+  "make_hyperstructures",
+  "Create hyperstructures at randomized positions on the map. Typically called by the game host.",
+  [n("count", "Number of hyperstructures to create")],
+  (client, signer, p) =>
+    wrapTx(() =>
+      (client.provider as any).blitz_realm_make_hyperstructures({
+        signer,
+        count: num(p.count),
+      }),
+    ),
+);
+
+// ---------------------------------------------------------------------------
 // High-level: move_to (pathfinding + execution)
 // ---------------------------------------------------------------------------
 

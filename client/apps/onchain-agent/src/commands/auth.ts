@@ -100,7 +100,7 @@ async function authSingleWorld(
     if (options.callbackUrl) {
       const callbackUrlParsed = new URL(options.callbackUrl);
       const port = parseInt(callbackUrlParsed.port || "3000", 10);
-      const host = "0.0.0.0"; // Must be externally reachable
+      const host = callbackUrlParsed.hostname || "127.0.0.1";
 
       const emitter = new JsonEmitter({ verbosity: "quiet", write: () => {} });
       const { close } = createApiServer(

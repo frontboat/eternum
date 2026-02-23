@@ -64,9 +64,10 @@ export function createApp(state: AppState) {
 
   // -- Handle keyboard input via public API --
   tui.addInputListener((data: string) => {
-    // Ctrl+C
+    // Ctrl+C — raw mode swallows SIGINT, so emit it manually
     if (data === "\x03") {
-      return; // Let the process SIGINT handler deal with it
+      process.kill(process.pid, "SIGINT");
+      return { consume: true };
     }
 
     // Enter key

@@ -8,7 +8,7 @@ import {
 import { getModel, type KnownProvider } from "@mariozechner/pi-ai";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
-import type { AccountInterface } from "starknet";
+import { Account, RpcProvider, uint256, CallData, type AccountInterface } from "starknet";
 import { createShutdownGate } from "./shutdown-gate";
 import { type AgentConfig, loadConfig } from "./config";
 import { EternumGameAdapter } from "./adapter/eternum-adapter";
@@ -52,6 +52,71 @@ function loadReferenceHandbooks(dataDir: string): string {
 
   if (sections.length === 0) return "";
   return `## Reference Handbooks (study these before acting)\n\n${sections.join("\n\n")}`;
+}
+
+/**
+ * Auto top-up fee tokens from master account on non-mainnet chains.
+ * Mirrors the game client's auto-top-up in use-world-registration.ts.
+ */
+async function autoTopUpFeeTokens(
+  rpcUrl: string,
+  toriiBaseUrl: string,
+  agentAddress: string,
+  feeTokenAddress: string | undefined,
+  emitter: JsonEmitter,
+): Promise<void> {
+  const masterAddress = process.env.MASTER_ADDRESS;
+  const masterPrivateKey = process.env.MASTER_PRIVATE_KEY;
+  if (!masterAddress || !masterPrivateKey) return;
+  if (!feeTokenAddress) return;
+
+  try {
+    // Query fee amount from world config
+    const sqlUrl = `${toriiBaseUrl}/sql?query=${encodeURIComponent(
+      'SELECT "blitz_registration_config.fee_amount" AS fee_amount FROM "s1_eternum-WorldConfig" LIMIT 1;',
+    )}`;
+    const resp = await fetch(sqlUrl);
+    if (!resp.ok) return;
+    const rows = (await resp.json()) as Record<string, unknown>[];
+    const rawFee = rows[0]?.fee_amount;
+    if (!rawFee) return;
+    const feeAmount = BigInt(String(rawFee));
+    if (feeAmount === 0n) return;
+
+    // Check agent's current fee token balance via RPC
+    const rpcProvider = new RpcProvider({ nodeUrl: rpcUrl });
+    const balanceResult = await rpcProvider.callContract({
+      contractAddress: feeTokenAddress,
+      entrypoint: "balance_of",
+      calldata: [agentAddress],
+    });
+    const balance = BigInt(balanceResult[0] ?? "0");
+
+    if (balance >= feeAmount) return; // Already funded
+
+    // Transfer shortfall from master account
+    const shortfall = feeAmount - balance;
+    const masterAccount = new Account({ provider: rpcProvider, address: masterAddress, signer: masterPrivateKey });
+    const amount = uint256.bnToUint256(shortfall);
+    await masterAccount.execute({
+      contractAddress: feeTokenAddress,
+      entrypoint: "transfer",
+      calldata: CallData.compile([agentAddress, amount.low, amount.high]),
+    });
+
+    emitter.emit({
+      type: "startup",
+      message: `Auto top-up: transferred ${(Number(shortfall) / 1e18).toFixed(2)} fee tokens from master account`,
+    });
+
+    // Brief wait for indexing
+    await new Promise((r) => setTimeout(r, 2000));
+  } catch (err) {
+    emitter.emit({
+      type: "error",
+      message: `Auto top-up failed: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
 }
 
 export async function mainHeadless(options: CliOptions): Promise<void> {
@@ -120,6 +185,17 @@ export async function mainHeadless(options: CliOptions): Promise<void> {
     }
   }
 
+  // Auto top-up fee tokens on non-mainnet chains (mirrors game client logic)
+  if (artifacts.profile.chain !== "mainnet") {
+    await autoTopUpFeeTokens(
+      config.rpcUrl,
+      artifacts.profile.toriiBaseUrl,
+      account.address,
+      artifacts.profile.feeTokenAddress,
+      emitter,
+    );
+  }
+
   // Create Eternum client
   const client = await EternumClient.create({
     rpcUrl: config.rpcUrl,
@@ -134,6 +210,12 @@ export async function mainHeadless(options: CliOptions): Promise<void> {
     entryToken: artifacts.profile.entryTokenAddress,
     worldAddress: config.worldAddress,
   } : undefined;
+
+  // Find the blitz contract address from manifest for registration flow
+  const blitzContract = (artifacts.manifest as any).contracts?.find(
+    (c: any) => typeof c.tag === "string" && c.tag.includes("blitz_realm_systems"),
+  );
+  const blitzAddress: string = blitzContract?.address ?? "";
   const adapter = new EternumGameAdapter(client, account as any, account.address, artifacts.manifest as any, config.gameName, tokenConfig);
   const mutableAdapter = new MutableGameAdapter(adapter);
 
@@ -149,6 +231,16 @@ export async function mainHeadless(options: CliOptions): Promise<void> {
   let isFirstTick = true;
   const formatTickPromptWithHandbooks = (state: EternumWorldState): string => {
     const base = formatEternumTickPrompt(state);
+    const needsRegistration = state.player.structures === 0 && state.player.armies === 0;
+
+    if (needsRegistration) {
+      // Build registration instructions with known token addresses
+      const feeToken = tokenConfig?.feeToken ?? "the fee token";
+      const entryToken = tokenConfig?.entryToken ?? "the entry token";
+      const spender = blitzAddress || "the blitz contract";
+      return `${base}\n\nCRITICAL: You have 0 structures and 0 armies. You are NOT registered in the game yet. You MUST register RIGHT NOW before doing anything else:\n\nStep 1: approve_token (token_address: "${feeToken}", spender: "${spender}", amount: "10000000000000000000")\nStep 2: obtain_entry_token (no params) — mints an entry token NFT to you\nStep 3: Find your minted token_id. Use inspect_sql to query your entry token balance.\nStep 4: lock_entry_token (token_id: <from step 3>, lock_id: 69)\nStep 5: register (name: your player name, entry_token_id: <from step 3>, cosmetic_token_ids: [])\nStep 6: settle_blitz_realm (settlement_count: 1) — bundles VRF + assign positions + settle atomically\n\nThe lock_id is always 69 (constant). If obtain_entry_token fails with "transfer amount exceeds balance", your account has insufficient fee tokens — report the error and stop.\n\nDo NOT study handbooks, do NOT list actions, do NOT write learnings. Just register.`;
+    }
+
     if (isFirstTick) {
       isFirstTick = false;
       const handbooks = loadReferenceHandbooks(config.dataDir);

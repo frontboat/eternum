@@ -1,11 +1,10 @@
+import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { loadConfig } from "../config";
-import { discoverAllWorlds, buildWorldProfile, buildResolvedManifest } from "../world/discovery";
+import { discoverAllWorlds, findWorldByName, buildWorldProfile, buildResolvedManifest } from "../world/discovery";
 import { ControllerSession, buildSessionPoliciesFromManifest } from "../session/controller-session";
 import { writeArtifacts, updateAuthStatus } from "../session/artifacts";
 import { deriveChainIdFromRpcUrl } from "../world/normalize";
-import { createApiServer } from "../api/server";
-import { JsonEmitter } from "../output/json-emitter";
 import type { DiscoveredWorld } from "../world/discovery";
 
 interface AuthOptions {
@@ -31,6 +30,63 @@ interface AuthResult {
   error?: string;
 }
 
+/**
+ * Lightweight HTTP server that only handles the /auth/callback endpoint.
+ * Supports both GET (browser redirect_uri) and POST (server-side callback_uri).
+ */
+function createCallbackServer(
+  callbackUrl: string,
+  onCallback: (sessionData: string) => void,
+): { server: Server; close: () => Promise<void> } {
+  const parsed = new URL(callbackUrl);
+  const port = parseInt(parsed.port || "3000", 10);
+  const host = parsed.hostname || "127.0.0.1";
+
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+
+    if (url.pathname === "/auth/callback") {
+      if (req.method === "GET") {
+        // Browser redirect: session data in ?startapp= query param
+        const sessionData = url.searchParams.get("startapp");
+        if (sessionData) {
+          onCallback(sessionData);
+          res.writeHead(200, { "Content-Type": "text/html" });
+          res.end(
+            "<html><body><script>window.close();</script>Session approved. You can close this window.</body></html>",
+          );
+        } else {
+          res.writeHead(400, { "Content-Type": "text/html" });
+          res.end("<html><body>Missing session data.</body></html>");
+        }
+      } else if (req.method === "POST") {
+        // Server-side callback_uri: Cartridge POSTs session data in body
+        const chunks: Buffer[] = [];
+        req.on("data", (chunk: Buffer) => chunks.push(chunk));
+        req.on("end", () => {
+          const body = Buffer.concat(chunks).toString();
+          onCallback(body);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        });
+      } else {
+        res.writeHead(405);
+        res.end();
+      }
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+
+  server.listen(port, host);
+
+  return {
+    server,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
 async function authSingleWorld(
   world: DiscoveredWorld,
   options: AuthOptions,
@@ -47,8 +103,7 @@ async function authSingleWorld(
       worldProfile: profile,
     });
 
-    // 2. Capture auth URL via callback
-    let authUrl = "";
+    // 2. Set up session
     const chainId = deriveChainIdFromRpcUrl(profile.rpcUrl ?? "") ?? config.chainId;
     const sessionBasePath = path.join(config.sessionBasePath, world.name);
 
@@ -60,9 +115,6 @@ async function authSingleWorld(
       manifest,
       worldProfile: profile,
       callbackUrl: options.callbackUrl,
-      onAuthUrl: (url) => {
-        authUrl = url;
-      },
     });
 
     // 3. Write artifacts
@@ -95,45 +147,24 @@ async function authSingleWorld(
       };
     }
 
-    // 5. If using --callback-url, start an API server to receive the redirect
-    let apiClose: (() => Promise<void>) | null = null;
+    // 5. If using --callback-url, start a lightweight callback server
+    let serverClose: (() => Promise<void>) | null = null;
     if (options.callbackUrl) {
-      const callbackUrlParsed = new URL(options.callbackUrl);
-      const port = parseInt(callbackUrlParsed.port || "3000", 10);
-      const host = callbackUrlParsed.hostname || "127.0.0.1";
-
-      const emitter = new JsonEmitter({ verbosity: "quiet", write: () => {} });
-      const { close } = createApiServer(
-        {
-          enqueuePrompt: async () => {},
-          getStatus: () => ({ phase: "auth", world: world.name }),
-          getState: () => ({}),
-          shutdown: async () => {},
-          applyConfig: async () => ({}),
-          emitter,
-        },
-        port,
-        host,
-        {
-          onCallback: (sessionData: string) => {
-            session.feedCallbackData(sessionData);
-          },
-        },
+      const { close } = createCallbackServer(
+        options.callbackUrl,
+        (sessionData: string) => session.feedCallbackData(sessionData),
       );
-      apiClose = close;
+      serverClose = close;
     }
 
-    // 6. Trigger connect (generates auth URL, waits for callback)
+    // 6. Trigger connect — await the URL being ready (resolves after URL
+    //    construction but before the callback wait, so we can output it).
     const connectPromise = session.connect();
-
-    // Wait a moment for the URL to be captured via the onAuthUrl callback
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    const authUrl = await session.waitForAuthUrl();
 
     if (authUrl) {
       updateAuthStatus(worldDir, { url: authUrl });
 
-      // Emit the URL immediately so an AI agent can read it from stdout
-      // before the callback completes. This is the key for programmatic use.
       if (options.json) {
         options.write(JSON.stringify({
           world: world.name,
@@ -143,7 +174,6 @@ async function authSingleWorld(
           callbackUrl: options.callbackUrl ?? null,
           artifactDir: worldDir,
         }));
-        // Flush — ensure the line is written before we block on connect
         options.write("");
       } else {
         options.write(`  Approve at: ${authUrl}\n`);
@@ -166,7 +196,7 @@ async function authSingleWorld(
         });
       } catch (approveErr) {
         const errorMsg = approveErr instanceof Error ? approveErr.message : String(approveErr);
-        if (apiClose) await apiClose();
+        if (serverClose) await serverClose();
         updateAuthStatus(worldDir, { status: "pending" });
         return {
           world: world.name,
@@ -179,10 +209,10 @@ async function authSingleWorld(
       }
     }
 
-    // 8. Wait for session approval (via localhost callback or external callback URL)
+    // 8. Wait for session approval
     try {
       const account = await connectPromise;
-      if (apiClose) await apiClose();
+      if (serverClose) await serverClose();
       updateAuthStatus(worldDir, {
         status: "active",
         address: account.address,
@@ -196,7 +226,7 @@ async function authSingleWorld(
         artifactDir: worldDir,
       };
     } catch {
-      if (apiClose) await apiClose();
+      if (serverClose) await serverClose();
       return {
         world: world.name,
         chain: world.chain,
@@ -219,16 +249,36 @@ async function authSingleWorld(
 }
 
 export async function runAuth(options: AuthOptions): Promise<number> {
-  const worlds = await discoverAllWorlds();
+  let targets: DiscoveredWorld[];
 
-  const targets = options.all
-    ? worlds
-    : worlds.filter((w) => w.name === options.world);
+  if (options.all) {
+    targets = await discoverAllWorlds();
+  } else if (options.world) {
+    // Try direct resolution first — more reliable than full discovery
+    // since it only needs the factory to resolve one world, not list all.
+    const direct = await findWorldByName(options.world);
+    if (direct) {
+      targets = [direct];
+    } else {
+      // Fall back to full discovery for a better error message
+      const worlds = await discoverAllWorlds();
+      targets = worlds.filter((w) => w.name === options.world);
+      if (targets.length === 0) {
+        const msg = `World "${options.world}" not found. Available: ${worlds.map((w) => w.name).join(", ")}`;
+        if (options.json) {
+          options.write(JSON.stringify({ error: msg }));
+        } else {
+          options.write(`${msg}\n`);
+        }
+        return 1;
+      }
+    }
+  } else {
+    targets = await discoverAllWorlds();
+  }
 
   if (targets.length === 0) {
-    const msg = options.world
-      ? `World "${options.world}" not found. Available: ${worlds.map((w) => w.name).join(", ")}`
-      : "No worlds discovered";
+    const msg = "No worlds discovered";
     if (options.json) {
       options.write(JSON.stringify({ error: msg }));
     } else {

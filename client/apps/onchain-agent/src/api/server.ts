@@ -70,22 +70,33 @@ export function createApiServer(
       } else if (req.method === "POST" && url.pathname === "/shutdown") {
         respond(res, 200, { ok: true });
         setImmediate(() => deps.shutdown());
-      } else if (req.method === "GET" && url.pathname === "/auth/callback") {
-        // Cartridge redirects here after the human approves in their browser.
-        // The session data is in the query param specified by redirect_query_name.
-        const sessionData = url.searchParams.get("startapp");
-        if (!sessionData) {
-          res.writeHead(400, { "Content-Type": "text/html" });
-          res.end("<html><body>Missing session data in callback.</body></html>");
-          return;
+      } else if (url.pathname === "/auth/callback") {
+        if (req.method === "GET") {
+          // Browser redirect: Cartridge redirects here after approval.
+          // Session data is in the ?startapp= query param (redirect_uri flow).
+          const sessionData = url.searchParams.get("startapp");
+          if (!sessionData) {
+            res.writeHead(400, { "Content-Type": "text/html" });
+            res.end("<html><body>Missing session data in callback.</body></html>");
+            return;
+          }
+          if (authCallback) {
+            authCallback.onCallback(sessionData);
+          }
+          res.writeHead(200, { "Content-Type": "text/html" });
+          res.end(
+            "<html><body><script>window.close();</script>Session registered successfully. You can close this window.</body></html>",
+          );
+        } else if (req.method === "POST") {
+          // Server-side POST: Cartridge POSTs session data (callback_uri flow).
+          const body = await collectBody(req);
+          if (authCallback) {
+            authCallback.onCallback(body);
+          }
+          respond(res, 200, { ok: true });
+        } else {
+          respond(res, 405, { error: "method not allowed" });
         }
-        if (authCallback) {
-          authCallback.onCallback(sessionData);
-        }
-        res.writeHead(200, { "Content-Type": "text/html" });
-        res.end(
-          "<html><body><script>window.close();</script>Session registered successfully. You can close this window.</body></html>",
-        );
       } else {
         respond(res, 404, { error: "not found" });
       }

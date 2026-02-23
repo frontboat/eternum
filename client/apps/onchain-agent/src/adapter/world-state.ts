@@ -1225,7 +1225,7 @@ export function formatEternumTickPrompt(state: EternumWorldState): string {
     }
     sections.push(lines.join("\n"));
   } else {
-    sections.push("### My Entities\n  None visible");
+    sections.push("### My Entities\n  None visible — you need to register first! Use: approve_token → obtain_entry_token → lock_entry_token → register → settle_blitz_realm");
   }
 
   // Operating area — unified minimap around all owned entities

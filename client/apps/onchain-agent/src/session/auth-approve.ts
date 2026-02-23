@@ -1,3 +1,23 @@
+/**
+ * Browser automation for headless session approval via the `agent-browser` CLI.
+ *
+ * Used by `axis auth --approve` to automate the Cartridge Controller approval
+ * flow without human interaction. Designed for CI/CD pipelines and fleet
+ * automation where browser-based approval needs to happen programmatically.
+ *
+ * Requires the `agent-browser` CLI tool to be installed and on PATH.
+ * Currently supports password authentication only.
+ *
+ * Flow:
+ * 1. Opens the Cartridge session approval URL in a headless browser
+ * 2. Fills in username/password credentials
+ * 3. Submits the login form
+ * 4. Clicks the policy approval button
+ * 5. Closes the browser
+ *
+ * The session data is delivered back to the caller via the redirect_uri
+ * or callback_uri specified in the session URL, not through this module.
+ */
 import { execFileSync } from "node:child_process";
 
 interface ApproveOptions {

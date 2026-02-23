@@ -1,9 +1,7 @@
 import path from "node:path";
-import { encode } from "starknet";
-import { signerToGuid } from "@cartridge/controller-wasm";
 import { loadConfig } from "../config";
 import { readArtifacts, updateAuthStatus } from "../session/artifacts";
-import { readFileSync, writeFileSync } from "node:fs";
+import { storeSessionFromCallback } from "../session/controller-session";
 
 interface AuthCompleteOptions {
   world?: string;
@@ -73,13 +71,20 @@ export async function runAuthComplete(options: AuthCompleteOptions): Promise<num
     return 1;
   }
 
-  // Decode the session registration from base64
-  let sessionRegistration: Record<string, unknown>;
   try {
-    const decoded = Buffer.from(sessionData, "base64").toString("utf-8");
-    sessionRegistration = JSON.parse(decoded);
-  } catch {
-    const msg = "Failed to decode session data. Ensure it's valid base64-encoded JSON.";
+    const { address } = storeSessionFromCallback(worldDir, sessionData);
+
+    updateAuthStatus(worldDir, { status: "active", address });
+
+    const result = { world: options.world, status: "active", address };
+    if (options.json) {
+      options.write(JSON.stringify(result, null, 2));
+    } else {
+      options.write(`  Session activated for ${options.world} (${address})\n`);
+    }
+    return 0;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
     if (options.json) {
       options.write(JSON.stringify({ error: msg }));
     } else {
@@ -87,72 +92,4 @@ export async function runAuthComplete(options: AuthCompleteOptions): Promise<num
     }
     return 1;
   }
-
-  // Read the existing session.json to get the signer keypair
-  const sessionFilePath = path.join(worldDir, "session.json");
-  let signerData: { privKey: string; pubKey: string };
-  try {
-    const raw = readFileSync(sessionFilePath, "utf-8");
-    const parsed = JSON.parse(raw);
-    // The signer might be stored as a JSON string or as an object
-    const signerRaw = parsed.signer ?? parsed;
-    signerData = typeof signerRaw === "string" ? JSON.parse(signerRaw) : signerRaw;
-  } catch {
-    const msg = 'No session.json with signer keypair found. Run "axis auth" first to generate keys.';
-    if (options.json) {
-      options.write(JSON.stringify({ error: msg }));
-    } else {
-      options.write(`${msg}\n`);
-    }
-    return 1;
-  }
-
-  // Mirror exactly what SessionProvider.connect() does:
-  // 1. lowercase address and ownerGuid
-  // 2. set guardianKeyGuid and metadataHash to "0x0"
-  // 3. compute sessionKeyGuid from the public key via signerToGuid
-  const formattedPk = encode.addHexPrefix(signerData.pubKey);
-
-  sessionRegistration.address = typeof sessionRegistration.address === "string"
-    ? sessionRegistration.address.toLowerCase()
-    : sessionRegistration.address;
-
-  sessionRegistration.ownerGuid = typeof sessionRegistration.ownerGuid === "string"
-    ? sessionRegistration.ownerGuid.toLowerCase()
-    : sessionRegistration.ownerGuid;
-
-  sessionRegistration.guardianKeyGuid = "0x0";
-  sessionRegistration.metadataHash = "0x0";
-  sessionRegistration.sessionKeyGuid = signerToGuid({
-    starknet: { privateKey: formattedPk },
-  });
-
-  // Write in the same format as SessionProvider's NodeBackend:
-  // { "signer": "<json-string>", "session": "<json-string>" }
-  const backendData: Record<string, string> = {};
-  backendData["signer"] = JSON.stringify(signerData);
-  backendData["session"] = JSON.stringify(sessionRegistration);
-
-  writeFileSync(sessionFilePath, JSON.stringify(backendData, null, 2));
-
-  // Update auth.json
-  const address = sessionRegistration.address as string;
-  updateAuthStatus(worldDir, {
-    status: "active",
-    address,
-  });
-
-  const result = {
-    world: options.world,
-    status: "active",
-    address,
-  };
-
-  if (options.json) {
-    options.write(JSON.stringify(result, null, 2));
-  } else {
-    options.write(`  Session activated for ${options.world} (${address})\n`);
-  }
-
-  return 0;
 }

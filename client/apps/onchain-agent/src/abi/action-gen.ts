@@ -5,22 +5,9 @@
  * that the LLM uses to discover and call actions. Supports optional domain
  * overlays for game-specific enrichments (descriptions, param transforms, etc.).
  */
+import type { ActionParamSchema, ActionDefinition } from "@bibliothecadao/game-agent";
 import { extractAllFromManifest, getGameEntrypoints, tagMatchesGame, abiTypeToParamSchemaType, describeStructFields } from "./parser";
 import type { ABIEntrypoint, ABIParam, ContractABIResult, DomainOverlayMap, Manifest, ActionRoute } from "./types";
-
-// Re-declared to avoid import from game-agent (which may not be built).
-interface ActionParamSchema {
-  name: string;
-  type: "number" | "string" | "boolean" | "number[]" | "object[]" | "bigint";
-  description: string;
-  required?: boolean;
-}
-
-interface ActionDefinition {
-  type: string;
-  description: string;
-  params: ActionParamSchema[];
-}
 
 // ── Action generation ────────────────────────────────────────────────────────
 

@@ -847,8 +847,8 @@ export async function buildWorldState(client: EternumClient, accountAddress: str
   if (ownedEntityIds.length > 0) {
     try {
       const [balanceRows, buildingRows] = (await Promise.all([
-        client.sql.fetchResourceBalancesAndProduction(ownedEntityIds),
-        client.sql.fetchBuildingsByStructures(ownedEntityIds).catch(() => [] as any[]),
+        client.sql.fetchResourceBalances(ownedEntityIds),
+        (client.sql as any).fetchBuildingsByStructures?.(ownedEntityIds).catch(() => [] as any[]) ?? Promise.resolve([] as any[]),
       ])) as [any[], any[]];
 
       // Group building positions by structure entity ID → occupied inner coords

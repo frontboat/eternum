@@ -31,6 +31,7 @@ CLI (cli.ts) → index.ts orchestrates:
 - `src/world/` — world discovery, factory SQL resolution, manifest patching
 - `src/session/` — Cartridge Controller session auth, artifact persistence, auth-approve, privatekey auth
 - `src/adapter/` — EternumGameAdapter, action registry (60+ actions), world state builder, simulation
+- `src/abi/` — ABI parser, action generator, executor, domain overlays, types
 - `src/api/` — HTTP steering API server (node:http)
 - `src/input/` — stdin JSON command reader
 - `src/output/` — NDJSON event emitter with verbosity filtering
@@ -38,6 +39,8 @@ CLI (cli.ts) → index.ts orchestrates:
 - `src/tools/` — extra inspect tools (realm, explorer, market, bank)
 - `src/release/` — binary packaging for cross-platform releases
 - `src/build-plugins.ts` — Bun build plugins (WASM embed + pi-config embed) for standalone binary
+- `src/runtime-paths.ts` — bundled asset path resolution for standalone binary
+- `src/shutdown-gate.ts` — graceful shutdown coordination primitive
 - `build.ts` — two-step build script (bundle with plugins, then compile)
 
 ### Core Dependencies
@@ -80,10 +83,11 @@ Eternum-specific logic from the framework. `MutableGameAdapter` wraps it for hot
 
 ### Action Registry
 
-All 60+ game actions are registered in `adapter/action-registry.ts` using
-`register(type, description, params, handler)`. Each handler receives `(client, signer, params)` and returns
-`{ success, txHash?, error? }`. Param values support human-friendly suffixes (K/M/B/T) and are coerced via helpers like
-`num()`, `precisionAmount()`, `bigNumberish()`.
+All 60+ game actions are dynamically generated from the Starknet/Dojo manifest ABI via `initializeActions()` in
+`adapter/action-registry.ts`. The ABI parser (`abi/parser.ts`) extracts entrypoints, `abi/action-gen.ts` generates
+`ActionDefinition[]` and routing maps, and `abi/domain-overlay.ts` enriches raw ABI entries with Eternum-specific
+descriptions, param transforms, and pre-flight validation. Param values support human-friendly suffixes (K/M/B/T) via
+helpers like `num()` and `precisionAmount()` from the domain overlay module.
 
 ### World State Builder
 
@@ -142,7 +146,7 @@ axis run --headless --world=<name>                 # NDJSON to stdout
 
 ### Artifact Directory
 
-`axis auth` persists all artifacts to `~/.eternum-agent/sessions/<worldName>/`:
+`axis auth` persists all artifacts to `~/.eternum-agent/.cartridge/<worldName>/`:
 - `profile.json` — world profile (chain, rpc, torii, worldAddress)
 - `manifest.json` — resolved manifest with live contract addresses
 - `policy.json` — generated session policies

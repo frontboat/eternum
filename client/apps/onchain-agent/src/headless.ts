@@ -5,7 +5,7 @@ import {
   type HeartbeatJob,
   type RuntimeConfigManager,
 } from "@bibliothecadao/game-agent";
-import { getModel } from "@mariozechner/pi-ai";
+import { getModel, type KnownProvider } from "@mariozechner/pi-ai";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import type { AccountInterface } from "starknet";
@@ -125,11 +125,16 @@ export async function mainHeadless(options: CliOptions): Promise<void> {
     rpcUrl: config.rpcUrl,
     toriiUrl: config.toriiUrl,
     worldAddress: config.worldAddress,
-    manifest: artifacts.manifest,
+    manifest: artifacts.manifest as any,
   });
   client.connect(account as any);
 
-  const adapter = new EternumGameAdapter(client, account as any, account.address);
+  const tokenConfig = artifacts.profile ? {
+    feeToken: artifacts.profile.feeTokenAddress,
+    entryToken: artifacts.profile.entryTokenAddress,
+    worldAddress: config.worldAddress,
+  } : undefined;
+  const adapter = new EternumGameAdapter(client, account as any, account.address, artifacts.manifest as any, config.gameName, tokenConfig);
   const mutableAdapter = new MutableGameAdapter(adapter);
 
   emitter.emit({
@@ -140,7 +145,7 @@ export async function mainHeadless(options: CliOptions): Promise<void> {
   });
 
   // Create game agent
-  const model = getModel(config.modelProvider, config.modelId);
+  const model = (getModel as Function)(config.modelProvider, config.modelId);
   let isFirstTick = true;
   const formatTickPromptWithHandbooks = (state: EternumWorldState): string => {
     const base = formatEternumTickPrompt(state);

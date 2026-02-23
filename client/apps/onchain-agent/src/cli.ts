@@ -142,7 +142,7 @@ function copyIfMissing(sourcePath: string, destinationPath: string) {
   copyFileSync(sourcePath, destinationPath);
 }
 
-function seedDataDir(dataDir: string) {
+export function seedDataDir(dataDir: string) {
   mkdirSync(dataDir, { recursive: true });
 
   const bundledDataDir = resolveBundledPath("data");

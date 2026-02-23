@@ -24,6 +24,7 @@ import { JsonEmitter } from "./output/json-emitter";
 import { createApiServer } from "./api/server";
 import { startStdinReader } from "./input/stdin-reader";
 import type { CliOptions } from "./cli-args";
+import { seedDataDir } from "./cli";
 
 function loadReferenceHandbooks(dataDir: string): string {
   const taskDir = path.join(dataDir, "tasks");
@@ -121,6 +122,9 @@ async function autoTopUpFeeTokens(
 
 export async function mainHeadless(options: CliOptions): Promise<void> {
   const config = loadConfig();
+
+  // Ensure data dir is seeded (soul.md, HEARTBEAT.md, tasks/) even if `init` was never run
+  seedDataDir(config.dataDir);
 
   const emitter = new JsonEmitter({
     verbosity: options.verbosity,

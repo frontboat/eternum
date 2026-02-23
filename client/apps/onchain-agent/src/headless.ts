@@ -123,6 +123,11 @@ async function autoTopUpFeeTokens(
 export async function mainHeadless(options: CliOptions): Promise<void> {
   const config = loadConfig();
 
+  // Scope data dir per-world so multiple agents don't share state
+  if (options.world) {
+    config.dataDir = path.join(config.dataDir, options.world);
+  }
+
   // Ensure data dir is seeded (soul.md, HEARTBEAT.md, tasks/) even if `init` was never run
   seedDataDir(config.dataDir);
 

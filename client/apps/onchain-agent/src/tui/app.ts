@@ -119,13 +119,7 @@ export function createApp(state: AppState) {
     }
   });
 
-  terminal.start(
-    () => {},
-    () => tui.requestRender(),
-  );
-
-  terminal.hideCursor();
-  tui.requestRender();
+  tui.start();
 
   return {
     tui,

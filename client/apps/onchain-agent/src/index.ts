@@ -23,6 +23,7 @@ import { createInspectTools } from "./tools/inspect-tools";
 import { getActionDefinitions } from "./adapter/action-registry";
 import { formatEternumTickPrompt, type EternumWorldState } from "./adapter/world-state";
 import { createRuntimeConfigManager } from "./runtime-config";
+import { seedDataDir } from "./cli";
 
 /**
  * Load all reference handbooks (autoload: false task files) from the data
@@ -187,6 +188,9 @@ export async function main() {
     // Scope data dir per-world so debug logs land alongside world state
     runtimeConfig.dataDir = path.join(runtimeConfig.dataDir, selected.name);
     process.env.AGENT_DATA_DIR = runtimeConfig.dataDir;
+
+    // Ensure world-scoped data dir is seeded (soul.md, HEARTBEAT.md, tasks/)
+    seedDataDir(runtimeConfig.dataDir);
   }
 
   console.log("  Connecting controller session...");

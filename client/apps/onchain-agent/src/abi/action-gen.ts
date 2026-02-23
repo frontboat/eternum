@@ -136,14 +136,13 @@ function buildParamSchemas(
     const override = paramOverrides?.[p.name];
     const schemaType = abiTypeToParamSchemaType(p.rawType, structNames);
 
-    // For struct params, include field descriptions so the LLM knows the shape
+    // For struct params, include field descriptions so the LLM knows the shape.
+    // If the domain overlay already provides a curated description, trust it.
     let description = override?.description ?? `${p.name} (${p.type})`;
-    if (structs) {
+    if (structs && !override?.description) {
       const structDesc = describeStructFields(p.rawType, structs);
       if (structDesc) {
-        description = override?.description
-          ? `${override.description} — pass as object: ${structDesc}`
-          : `${p.name} — pass as object: ${structDesc}`;
+        description = `${p.name} — pass as object: ${structDesc}`;
       }
     }
 

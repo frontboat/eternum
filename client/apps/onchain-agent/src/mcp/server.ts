@@ -84,7 +84,7 @@ export async function startMcpServer(): Promise<void> {
   let donkeyCapacityGrams = 50_000;
   const resourceWeightGrams = new Map<number, number>();
 
-  const mapCtx: MapContext = { snapshot: null, protocol: null, filePath: null };
+  let mapCtx: MapContext = { snapshot: null, protocol: null, filePath: null };
   const automationStatus: AutomationStatusMap = new Map();
   let automationLoop: ReturnType<typeof createAutomationLoop> | null = null;
   let automationRunning = false;
@@ -647,20 +647,9 @@ export async function startMcpServer(): Promise<void> {
       resourceWeightGrams.set(k, v);
     }
 
-    // Adopt the bootstrap's mapCtx state into our local mapCtx
-    mapCtx.snapshot = result.mapCtx.snapshot;
-    mapCtx.protocol = result.mapCtx.protocol;
-    mapCtx.refresh = result.mapCtx.refresh;
-
-    // Keep our local mapCtx in sync with the bootstrap's mapCtx
-    // by forwarding snapshot/protocol updates
-    const bootstrapMapCtx = result.mapCtx;
-    const origRefresh = mapCtx.refresh;
-    mapCtx.refresh = async () => {
-      if (origRefresh) await origRefresh();
-      mapCtx.snapshot = bootstrapMapCtx.snapshot;
-      mapCtx.protocol = bootstrapMapCtx.protocol;
-    };
+    // Use the bootstrap's mapCtx directly — the background loop updates it
+    // every 10s, so reads are always current.
+    mapCtx = result.mapCtx;
 
     authUrl = null;
     log(`Account: ${playerAddress}`);
